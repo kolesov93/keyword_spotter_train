@@ -1,1 +1,1 @@
-# keyword_spotter_train
+Keyword spotter train
