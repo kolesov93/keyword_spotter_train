@@ -3,10 +3,12 @@
 from typing import Dict, List, Tuple
 import hashlib
 import logging
+import math
 import os
 import re
 
 import torch
+import numpy as np
 
 Index = Dict[str, List[str]]
 
@@ -16,9 +18,84 @@ MAX_NUM_WAVS_PER_CLASS = 2**27 - 1  # ~134M
 SILENCE = '_silence_'
 BACKGROUND_FOLDER = '_background_noise_'
 
+SILENCE_PROB = 0.3
+UNKNOWN_PROB = 0.3
+
+SILENCE_LABEL = 0
+UNKNOWN_LABEL = 1
+
+
+def _get_samples(index: Index, wanted_words: List[str]) -> List[Tuple[str, int]]:
+    """Get only wanted words: (fname, label).
+    Note: first two labels are reserved for silence and unknown"""
+    result = []
+    for label, word in enumerate(wanted_words):
+        if word not in index:
+            raise ValueError(f'No samples for "{word}" in index')
+        for fname in index[word]:
+            result.append((label + 2, fname))
+    np.random.RandomState(seed=1993).shuffle(result)
+    return result
+
+
+def _get_bg_samples(index: Index) -> List[str]:
+    if (BACKGROUND_FOLDER not in index) or (not index[BACKGROUND_FOLDER]):
+        raise ValueError(f'No background samples')
+    return index[BACKGROUND_FOLDER]
+
+
+def _get_unknown_samples(index: Index, wanted_words: List[str]) -> List[Tuple[str, int]]:
+    """Get not wanted words and not BACKGROUND_FOLDER."""
+    wanted_words = set(wanted_words)
+    result = []
+    for label, fnames in index.items():
+        if label in wanted_words or label == BACKGROUND_FOLDER:
+            continue
+        result.extend(fnames)
+    np.random.RandomState(seed=1993).shuffle(result)
+    return result
+
+
+def _get_worker_slice(a):
+    worker_info = torch.utils.data.get_worker_info()
+    if worker_info is None:
+        return a
+    per_worker = int(math.ceil(len(a) / worker_info.num_workers))
+    worker_id = worker_info.id
+    start = worker_id * per_worker
+    end = min(start + per_worker, len(a))
+    return a[start: end]
+
+def _get_seed_for_worker() -> int:
+    worker_info = torch.utils.data.get_worker_info()
+    if worker_info is None:
+        return 1992
+    return 1993 + worker_info.id
+
+
 
 class GoogleSpeechCommandsDataset(torch.utils.data.IterableDataset):
-    pass
+
+    def __init__(self, index: Index, wanted_words: List[str]):
+        self._samples = _get_samples(index, wanted_words)
+        self._bg_samples = _get_bg_samples(index)
+        self._unknown_samples = _get_unknown_samples(index, wanted_words)
+
+
+    def __iter__(self):
+        samples = _get_worker_slice(self._samples)
+        unknown_samples = _get_worker_slice(self._unknown_samples)
+
+        rnd = np.random.RandomState(seed=_get_seed_for_worker())
+        for _ in range(10):
+            if rnd.random() < UNKNOWN_PROB:
+                fname, label = rnd.choice(unknown_samples), UNKNOWN_LABEL
+            else:
+                fname, label = rnd.choice(samples)
+
+            yield {'name': fname, 'label': label}
+
+
 
 
 def get_index(folder: str) -> Index:
