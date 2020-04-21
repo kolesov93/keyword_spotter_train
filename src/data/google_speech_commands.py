@@ -8,6 +8,7 @@ import os
 import re
 
 import torch
+import librosa
 import numpy as np
 
 Index = Dict[str, List[str]]
@@ -16,6 +17,8 @@ LOGGER = logging.getLogger('spotter_train')
 MAX_NUM_WAVS_PER_CLASS = 2**27 - 1  # ~134M
 
 SILENCE = '_silence_'
+UNKNOWN = '_unknown_'
+
 BACKGROUND_FOLDER = '_background_noise_'
 
 SILENCE_PROB = 0.3
@@ -23,6 +26,8 @@ UNKNOWN_PROB = 0.3
 
 SILENCE_LABEL = 0
 UNKNOWN_LABEL = 1
+
+SAMPLE_RATE = 16000
 
 
 def _get_samples(index: Index, wanted_words: List[str]) -> List[Tuple[str, int]]:
@@ -33,7 +38,7 @@ def _get_samples(index: Index, wanted_words: List[str]) -> List[Tuple[str, int]]
         if word not in index:
             raise ValueError(f'No samples for "{word}" in index')
         for fname in index[word]:
-            result.append((label + 2, fname))
+            result.append((fname, label + 2))
     np.random.RandomState(seed=1993).shuffle(result)
     return result
 
@@ -66,12 +71,22 @@ def _get_worker_slice(a):
     end = min(start + per_worker, len(a))
     return a[start: end]
 
+
 def _get_seed_for_worker() -> int:
     worker_info = torch.utils.data.get_worker_info()
     if worker_info is None:
         return 1992
     return 1993 + worker_info.id
 
+
+def _get_label(label: int, wanted_words: List[str]) -> str:
+    if label == SILENCE_LABEL:
+        return SILENCE
+    if label == UNKNOWN_LABEL:
+        return UNKNOWN
+    if label - 2 < 0 or label - 2 >= len(wanted_words):
+        raise ValueError(f'Unknown label {label}')
+    return wanted_words[label - 2]
 
 
 class GoogleSpeechCommandsDataset(torch.utils.data.IterableDataset):
@@ -81,6 +96,14 @@ class GoogleSpeechCommandsDataset(torch.utils.data.IterableDataset):
         self._bg_samples = _get_bg_samples(index)
         self._unknown_samples = _get_unknown_samples(index, wanted_words)
 
+        self._cache = {}
+
+    def _read_audio(self, fname):
+        if fname in self._cache:
+            return self._cache[fname]
+        data = librosa.core.load(fname, sr=SAMPLE_RATE)[0]
+        self._cache[fname] = data
+        return data
 
     def __iter__(self):
         samples = _get_worker_slice(self._samples)
@@ -91,11 +114,9 @@ class GoogleSpeechCommandsDataset(torch.utils.data.IterableDataset):
             if rnd.random() < UNKNOWN_PROB:
                 fname, label = rnd.choice(unknown_samples), UNKNOWN_LABEL
             else:
-                fname, label = rnd.choice(samples)
+                fname, label = samples[rnd.choice(len(samples))]
 
-            yield {'name': fname, 'label': label}
-
-
+            yield {'data': self._read_audio(fname), 'label': label, 'fname': fname}
 
 
 def get_index(folder: str) -> Index:
@@ -144,5 +165,10 @@ def split_index(index: Index, dev_percentage: float, test_percentage: float) -> 
         for cresult in result:
             cresult[label] = []
         for fname in fnames:
-            result[which_set(fname, dev_percentage, test_percentage)][label].append(fname)
+            if label == BACKGROUND_FOLDER:
+                # this is a potential leak, but I'm repoducing https://github.com/castorini/honk/blob/master/utils/model.py#L339
+                for cresult in result:
+                    cresult[label].append(fname)
+            else:
+                result[which_set(fname, dev_percentage, test_percentage)][label].append(fname)
     return result
