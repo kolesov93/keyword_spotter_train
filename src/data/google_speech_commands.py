@@ -130,9 +130,10 @@ class GoogleSpeechCommandsDataset(torch.utils.data.IterableDataset):
         self._bg_samples = _get_bg_samples(index)
         self._unknown_samples = _get_unknown_samples(index, wanted_words)
 
-        self._tag = tag
-
         self._cache = {}
+
+        self._tag = tag
+        self._fixed_set = self._prepare_fixed_set()
 
     def _read_audio(self, fname):
         if fname in self._cache:
@@ -149,8 +150,7 @@ class GoogleSpeechCommandsDataset(torch.utils.data.IterableDataset):
         noise = rnd.random() * NOISE_COEF * self._get_bg_snippet(rnd)
         return np.clip(audio + noise, -1., 1.)
 
-    def _get_unknown_sample(self, unknown_samples: List[str], rnd: np.random.RandomState, add_noise: bool):
-        fname = rnd.choice(unknown_samples)
+    def _get_unknown_sample(self, fname: str, rnd: np.random.RandomState, add_noise: bool):
         data = _ensure_duration(self._read_audio(fname))
         if add_noise:
             data = self._add_noise(data, rnd)
@@ -160,28 +160,60 @@ class GoogleSpeechCommandsDataset(torch.utils.data.IterableDataset):
         data = rnd.random() * NOISE_COEF * self._get_bg_snippet(rnd)
         return {'data': data, 'label': SILENCE_LABEL}
 
-    def _get_command_sample(self, samples: List[Tuple[str, int]], rnd: np.random.RandomState, add_noise: bool):
-        fname, label = samples[rnd.choice(len(samples))]
+    def _get_command_sample(self, sample: Tuple[str, int], rnd: np.random.RandomState, add_noise: bool):
+        fname, label = sample
         data = _ensure_duration(self._read_audio(fname))
         if add_noise:
             data = self._add_noise(data, rnd)
         return {'data': data, 'label': label}
 
+    def _prepare_fixed_set(self):
+        if self._tag == DatasetTag.TRAIN:
+            return None
+
+        rnd = np.random.RandomState(seed=1993)
+        result = []
+        for sample in self._samples:
+            result.append(
+                self._get_command_sample(
+                    sample,
+                    rnd,
+                    add_noise=False
+                )
+            )
+        for _ in range(int(len(self._samples) * UNKNOWN_PROB)):
+            result.append(
+                self._get_unknown_sample(
+                    rnd.choice(self._unknown_samples),
+                    rnd,
+                    add_noise=False
+                )
+            )
+        for _ in range(int(len(self._samples) * SILENCE_PROB)):
+            result.append(
+                self._get_silence_sample(rnd)
+            )
+        return result
+
     def __iter__(self):
+        if self._tag == DatasetTag.DEV or self._tag == DatasetTag.TEST:
+            yield from self._fixed_set
+            return
+
+        rnd = np.random.RandomState(seed=_get_seed_for_worker())
         samples = _get_worker_slice(self._samples)
         unknown_samples = _get_worker_slice(self._unknown_samples)
 
-        rnd = np.random.RandomState(seed=_get_seed_for_worker())
-        for _ in range(20):
+        while True:
             coin = rnd.random()
 
             add_noise = rnd.random() < NOISE_PROB
             if coin < UNKNOWN_PROB:
-                yield self._get_unknown_sample(unknown_samples, rnd, add_noise)
+                yield self._get_unknown_sample(rnd.choice(unknown_samples), rnd, add_noise)
             elif coin < UNKNOWN_PROB + SILENCE_PROB:
                 yield self._get_silence_sample(rnd)
             else:
-                yield self._get_command_sample(samples, rnd, add_noise)
+                yield self._get_command_sample(samples[rnd.choice(len(samples))], rnd, add_noise)
 
 
 def get_index(folder: str) -> Index:

@@ -27,14 +27,14 @@ def main(args):
     LOGGER.setLevel(logging.INFO)
 
     indexes = gsc.split_index(gsc.get_index(args.data), DEV_PERCENTAGE, TEST_PERCENTAGE)
-    testset = gsc.GoogleSpeechCommandsDataset(
-        indexes[DatasetTag.TEST],
+    trainset = gsc.GoogleSpeechCommandsDataset(
+        indexes[DatasetTag.TRAIN],
         WANTED_WORDS,
-        DatasetTag.TEST
+        DatasetTag.TRAIN
     )
-    for sample in testset:
+    for sample in trainset:
         print(gsc._get_label(sample['label'], WANTED_WORDS))
-        sd.play(sample['data'], gsc.SAMPLE_RATE, blocking=True)
+        # sd.play(sample['data'], gsc.SAMPLE_RATE, blocking=True)
 
 if __name__ == '__main__':
     main(_parse_args())
