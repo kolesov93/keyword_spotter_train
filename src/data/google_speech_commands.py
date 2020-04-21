@@ -11,6 +11,8 @@ import torch
 import librosa
 import numpy as np
 
+from .common import DatasetTag
+
 Index = Dict[str, List[str]]
 
 LOGGER = logging.getLogger('spotter_train')
@@ -89,6 +91,24 @@ def _get_label(label: int, wanted_words: List[str]) -> str:
     return wanted_words[label - 2]
 
 
+def _ensure_duration(audio: np.array) -> np.array:
+    samples = SAMPLE_RATE # exactly one second
+
+    if len(audio) == samples:
+        return audio
+
+    if len(audio) > samples:
+        to_remove = len(audio) - samples
+        left = to_remove // 2
+        return audio[left: left + samples]
+
+    to_pad = samples - len(audio)
+    left = to_pad // 2
+    right = to_pad - left
+
+    return np.pad(audio, (left, right), 'constant')
+
+
 class GoogleSpeechCommandsDataset(torch.utils.data.IterableDataset):
 
     def __init__(self, index: Index, wanted_words: List[str]):
@@ -143,19 +163,19 @@ def get_index(folder: str) -> Index:
     return result
 
 
-def which_set(fname: str, dev_percentage: float, test_percentage: float) -> int:
-    """Return 0 for train, 1 for dev, 2 for test.
-    Reason: https://github.com/tensorflow/tensorflow/blob/master/tensorflow/examples/speech_commands/input_data.py#L70
+def which_set(fname: str, dev_percentage: float, test_percentage: float) -> DatasetTag:
+    """
+    See https://github.com/tensorflow/tensorflow/blob/master/tensorflow/examples/speech_commands/input_data.py#L70
     """
     base_name = os.path.basename(fname)
     hash_name = re.sub(r'_nohash_.*$', '', base_name)
     hash_name_hashed = hashlib.sha1(hash_name.encode('UTF-8')).hexdigest()
     percentage_hash = ((int(hash_name_hashed, 16) % (MAX_NUM_WAVS_PER_CLASS + 1)) * (100.0 / MAX_NUM_WAVS_PER_CLASS))
     if percentage_hash < dev_percentage:
-        return 1
+        return DatasetTag.DEV
     if percentage_hash < dev_percentage + test_percentage:
-        return 2
-    return 0
+        return DatasetTag.TEST
+    return DatasetTag.TRAIN
 
 
 def split_index(index: Index, dev_percentage: float, test_percentage: float) -> Tuple[Index, Index, Index]:
