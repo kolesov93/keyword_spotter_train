@@ -6,6 +6,7 @@ import logging
 import sounddevice as sd
 
 import data.google_speech_commands as gsc
+from data.common import DatasetTag
 
 LOGGER = logging.getLogger('spotter_train')
 
@@ -26,9 +27,13 @@ def main(args):
     LOGGER.setLevel(logging.INFO)
 
     indexes = gsc.split_index(gsc.get_index(args.data), DEV_PERCENTAGE, TEST_PERCENTAGE)
-    testset = gsc.GoogleSpeechCommandsDataset(indexes[2], WANTED_WORDS)
+    testset = gsc.GoogleSpeechCommandsDataset(
+        indexes[DatasetTag.TEST],
+        WANTED_WORDS,
+        DatasetTag.TEST
+    )
     for sample in testset:
-        print(sample['fname'], gsc._get_label(sample['label'], WANTED_WORDS))
+        print(gsc._get_label(sample['label'], WANTED_WORDS))
         sd.play(sample['data'], gsc.SAMPLE_RATE, blocking=True)
 
 if __name__ == '__main__':
