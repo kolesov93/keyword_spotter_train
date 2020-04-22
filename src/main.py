@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """Train keyword spotter."""
 import argparse
-import logging
 import copy
+import enum
+import json
+import logging
+import os
+
+from typing import Dict
 
 import numpy as np
 import torch
@@ -11,6 +16,7 @@ import torch.nn as nn
 import torchaudio
 from torch.autograd import Variable
 import torch.nn.functional as F
+from torch.utils.tensorboard import SummaryWriter
 
 import data.google_speech_commands as gsc
 from data.common import DatasetTag
@@ -24,14 +30,20 @@ TEST_PERCENTAGE = 10.
 
 WANTED_WORDS = 'yes,no,up,down,left,right,on,off,stop,go'.split(',')
 
-BATCH_SIZE = 32
-LR = 1e-2
+BATCH_SIZE = 64
+LR = 1e-1
 DEV_EVERY_BATCHES = 1024
+DUMP_SUMMARY_EVERY_STEPS = 20
+MAX_PLATEAUS = 2
+
+class Metrics(enum.Enum):
+    ACCURACY = 'accuracy'
+    XENT = 'xent'
+
 
 def collate_fn(samples):
     x, y = [], []
     for sample in samples:
-        #print(type(sample['data'].reshape(1, -1)), sample['data'].reshape(1, -1).size)
         x.append(
             torchaudio.compliance.kaldi.fbank(
                 torch.from_numpy(sample['data'].reshape(1, -1)),
@@ -47,6 +59,7 @@ def collate_fn(samples):
 def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('data', help='path/to/google_speech_command/dataset')
+    parser.add_argument('traindir', help='path/to/traindir')
     return parser.parse_args()
 
 class LinearModel(torch.nn.Module):
@@ -89,6 +102,38 @@ class FeedforwardModel(torch.nn.Module):
         x = self._final(x)
         return x
 
+class AccuracyComputer:
+    def __init__(self):
+        self._correct_predictions = 0
+        self._all_predictions = 0
+
+    def update(self, scores, y):
+        _, predicted = torch.max(scores, 1)
+        self._correct_predictions += (predicted == y).sum().item()
+        self._all_predictions += y.size(0)
+
+    def compute(self):
+        return self._correct_predictions / self._all_predictions
+
+
+class AverageLossComputer:
+    def __init__(self):
+        self._loss_sum = 0.
+        self._times = 0
+
+    def update(self, loss):
+        self._loss_sum += loss
+        self._times += 1
+
+    def compute(self):
+        return self._loss_sum / self._times
+
+
+def compute_accuracy(scores, y):
+    a = AccuracyComputer()
+    a.update(scores, y)
+    return a.compute()
+
 
 def evaluate(model, dataset):
     LOGGER.info('Starting evaluation')
@@ -101,32 +146,57 @@ def evaluate(model, dataset):
     model.eval()
     torch.cuda.set_device(0)
     model.cuda()
-    loss_sum = 0.
-    nbatches = 0
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss().cuda()
+
+    accuracy_computer = AccuracyComputer()
+    loss_computer = AverageLossComputer()
     for i, (x, y) in enumerate(loader):
         torch.cuda.set_device(0)
         x, y = x.cuda(), y.cuda()
         scores = model(x)
         loss = criterion(scores, y)
-        loss_sum += loss.item()
-        nbatches += 1
 
-        if nbatches % 10 == 0:
-            LOGGER.info('Evaluation-xent [batch: %d]: %.02f', nbatches, loss_sum / nbatches)
+        accuracy_computer.update(scores, y)
+        loss_computer.update(loss.item())
 
-    result_loss = loss_sum / nbatches
-    LOGGER.info('Evaluation-xent: %.02f', result_loss)
-    return result_loss
+    result = {
+        Metrics.ACCURACY: accuracy_computer.compute() * 100.,
+        Metrics.XENT: loss_computer.compute()
+    }
+    LOGGER.info('Evaluation is finished')
+    for metric, value in result.items():
+        LOGGER.info('%s: %.02f', metric, value)
+    return result
+
+def _dump_val_metrics(writer: SummaryWriter, metrics: Dict[Metrics, float], step: int):
+    for metric, value in metrics.items():
+        writer.add_scalar(
+            'eval/{}'.format(metric),
+            value,
+            step
+        )
+    writer.flush()
 
 def train(args, sets):
+    if os.path.exists(args.traindir):
+        raise ValueError(f'{args.traindir} already exists')
+
+    os.makedirs(args.traindir)
+    logdir = os.path.join(args.traindir, 'logs')
+    summary_writer = SummaryWriter(logdir)
+
     #model = FeedforwardModel([128, 128, 64], len(WANTED_WORDS) + 2)
     #model = LinearModel(16000, len(WANTED_WORDS) + 2)
     config = copy.deepcopy(resnet.RES8_CONFIG)
     config['n_labels'] = len(WANTED_WORDS) + 2
     model = resnet.SpeechResModel(config)
 
-    prev_eval_loss = evaluate(model, sets[DatasetTag.DEV])
+    prev_eval_metrics = evaluate(model, sets[DatasetTag.DEV])
+    _dump_val_metrics(summary_writer, prev_eval_metrics, 0)
+    prev_model_fname = os.path.join(args.traindir, 'model_0.mdl')
+    model.save(prev_model_fname)
+    with open(os.path.join(args.traindir, 'dev_metrics_0.json'), 'w') as fout:
+        json.dump({m.value: value for m, value in prev_eval_metrics.items()}, fout)
 
     loader = torch.utils.data.DataLoader(
         sets[DatasetTag.TRAIN],
@@ -140,34 +210,79 @@ def train(args, sets):
     optimizer = torch.optim.SGD(
         model.parameters(),
         lr=curlr,
+        momentum=0.9
     )
 
+    nplateaus = 0
     model.cuda()
     for batch_idx, (x, y) in enumerate(loader):
         model.train()
         optimizer.zero_grad()
+
         x = Variable(x, requires_grad=False).cuda()
-        scores = model(x)
         y = Variable(y, requires_grad=False).cuda()
+
+        scores = model(x)
         loss = criterion(scores, y)
+
         loss.backward()
         optimizer.step()
 
-        if batch_idx % 10 == 0:
-            LOGGER.info('Train-xent [batch %d]: %.02f', batch_idx, loss.item())
+        if (batch_idx + 1) % DUMP_SUMMARY_EVERY_STEPS == 0:
+            summary_writer.add_scalar(
+                'train/xent',
+                loss.item(),
+                batch_idx + 1
+            )
+            summary_writer.add_scalar(
+                'train/accuracy',
+                compute_accuracy(scores, y),
+                batch_idx + 1
+            )
+            summary_writer.add_scalar(
+                'train/lr',
+                curlr,
+                batch_idx + 1
+            )
 
         if (batch_idx + 1) % DEV_EVERY_BATCHES == 0:
-            new_eval_loss = evaluate(model, sets[DatasetTag.DEV])
-            if new_eval_loss > prev_eval_loss:
-                LOGGER.info('Evaluation loss (%.02f) is bigger than previous (%.02f)', new_eval_loss, prev_eval_loss)
+            new_eval_metrics = evaluate(model, sets[DatasetTag.DEV])
+            new_model_fname = os.path.join(args.traindir, 'model_{}.mdl'.format(batch_idx + 1))
+            model.save(new_model_fname)
+            _dump_val_metrics(summary_writer, new_eval_metrics, batch_idx + 1)
+            with open(os.path.join(args.traindir, 'dev_metrics_{}.json'.format(batch_idx + 1)), 'w') as fout:
+                json.dump({m.value: value for m, value in new_eval_metrics.items()}, fout)
+
+            if new_eval_metrics[Metrics.ACCURACY] < prev_eval_metrics[Metrics.ACCURACY]:
+                nplateaus += 1
+                if nplateaus > MAX_PLATEAUS:
+                    LOGGER.warning('Hitted plateau %d times, exiting', nplateaus)
+                    break
                 curlr = curlr / 1.5
                 optimizer = torch.optim.SGD(
                     model.parameters(),
                     lr=curlr,
+                    momentum=0.9
+                )
+                LOGGER.warning(
+                    'Accuracy is getting worse (%.02f vs %.02f), decreasing lr to: %f',
+                    new_eval_metrics[Metrics.ACCURACY],
+                    prev_eval_metrics[Metrics.ACCURACY],
+                    curlr
+                )
+                model.load(prev_model_fname)
+                LOGGER.warning(
+                    'Reloaded model from %s', prev_model_fname
                 )
             else:
-                LOGGER.info('Evaluation loss (%.02f) is less than previous (%.02f); continue', new_eval_loss, prev_eval_loss)
-                prev_eval_loss = new_eval_loss
+                prev_eval_metrics = new_eval_metrics
+                prev_model_fname = new_model_fname
+
+    LOGGER.info('Best model is in %s', prev_model_fname)
+    model.load(prev_model_fname)
+    test_metrics = evaluate(model, sets[DatasetTag.TEST])
+    with open(os.path.join(args.traindir, 'test_metrics.json'), 'w') as fout:
+        json.dump({m.value: value for m, value in test_metrics.items()}, fout)
 
 
 def main(args):
