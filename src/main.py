@@ -30,34 +30,43 @@ TEST_PERCENTAGE = 10.
 
 WANTED_WORDS = 'yes,no,up,down,left,right,on,off,stop,go'.split(',')
 
-BATCH_SIZE = 64
-LR = 1e-1
 DEV_EVERY_BATCHES = 1024
 DUMP_SUMMARY_EVERY_STEPS = 20
-MAX_PLATEAUS = 2
+MAX_PLATEAUS = 6
 
 class Metrics(enum.Enum):
     ACCURACY = 'accuracy'
     XENT = 'xent'
 
 
-def collate_fn(samples):
-    x, y = [], []
-    for sample in samples:
-        x.append(
-            torchaudio.compliance.kaldi.fbank(
-                torch.from_numpy(sample['data'].reshape(1, -1)),
-                num_mel_bins=80,
-                dither=0.
-            ).reshape(1, -1, 80)
-        )
-        y.append(sample['label'])
-    x = torch.cat(x, 0)
-    y = np.array(y, dtype=np.int64)
-    return x, torch.from_numpy(y)
+def make_collate_fn(args):
+
+    def collate_fn(samples):
+        x, y = [], []
+        for sample in samples:
+            x.append(
+                torchaudio.compliance.kaldi.fbank(
+                    torch.from_numpy(sample['data'].reshape(1, -1)),
+                    num_mel_bins=args.num_mel_bins,
+                    frame_shift=args.frame_shift,
+                    frame_length=args.frame_length,
+                    dither=0.
+                ).reshape(1, -1, args.num_mel_bins)
+            )
+            y.append(sample['label'])
+        x = torch.cat(x, 0)
+        y = np.array(y, dtype=np.int64)
+        return x, torch.from_numpy(y)
+
+    return collate_fn
 
 def _parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--batch-size', type=int, default=64, help='batch size')
+    parser.add_argument('--lr', type=float, default=1e-1, help='starting learning rate')
+    parser.add_argument('--frame-length', type=float, default=25., help='frame length in ms')
+    parser.add_argument('--frame-shift', type=float, default=10., help='frame shift in ms')
+    parser.add_argument('--num-mel-bins', type=int, default=80, help='num mel filters')
     parser.add_argument('data', help='path/to/google_speech_command/dataset')
     parser.add_argument('traindir', help='path/to/traindir')
     return parser.parse_args()
@@ -135,7 +144,7 @@ def compute_accuracy(scores, y):
     return a.compute()
 
 
-def evaluate(model, dataset):
+def evaluate(model, dataset, collate_fn):
     LOGGER.info('Starting evaluation')
 
     loader = torch.utils.data.DataLoader(
@@ -177,21 +186,33 @@ def _dump_val_metrics(writer: SummaryWriter, metrics: Dict[Metrics, float], step
         )
     writer.flush()
 
+def _initialize_logging(traindir):
+    handler = logging.FileHandler(os.path.join(traindir, 'log'))
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    handler.setLevel(logging.DEBUG)
+    LOGGER.addHandler(handler)
+
+
 def train(args, sets):
     if os.path.exists(args.traindir):
         raise ValueError(f'{args.traindir} already exists')
 
     os.makedirs(args.traindir)
-    logdir = os.path.join(args.traindir, 'logs')
-    summary_writer = SummaryWriter(logdir)
 
-    #model = FeedforwardModel([128, 128, 64], len(WANTED_WORDS) + 2)
-    #model = LinearModel(16000, len(WANTED_WORDS) + 2)
+    summary_writer = SummaryWriter(os.path.join(args.traindir, 'summaries'))
+    _initialize_logging(args.traindir)
+
+    with open(os.path.join(args.traindir, 'options.json'), 'w') as fout:
+        json.dump(vars(args), fout)
+
+    collate_fn = make_collate_fn(args)
+
     config = copy.deepcopy(resnet.RES8_CONFIG)
     config['n_labels'] = len(WANTED_WORDS) + 2
     model = resnet.SpeechResModel(config)
 
-    prev_eval_metrics = evaluate(model, sets[DatasetTag.DEV])
+    prev_eval_metrics = evaluate(model, sets[DatasetTag.DEV], collate_fn)
     _dump_val_metrics(summary_writer, prev_eval_metrics, 0)
     prev_model_fname = os.path.join(args.traindir, 'model_0.mdl')
     model.save(prev_model_fname)
@@ -200,13 +221,13 @@ def train(args, sets):
 
     loader = torch.utils.data.DataLoader(
         sets[DatasetTag.TRAIN],
-        batch_size=BATCH_SIZE,
+        batch_size=args.batch_size,
         collate_fn=collate_fn,
         num_workers=4
     )
 
     criterion = nn.CrossEntropyLoss()
-    curlr = LR
+    curlr = args.lr
     optimizer = torch.optim.SGD(
         model.parameters(),
         lr=curlr,
@@ -246,7 +267,7 @@ def train(args, sets):
             )
 
         if (batch_idx + 1) % DEV_EVERY_BATCHES == 0:
-            new_eval_metrics = evaluate(model, sets[DatasetTag.DEV])
+            new_eval_metrics = evaluate(model, sets[DatasetTag.DEV], collate_fn)
             new_model_fname = os.path.join(args.traindir, 'model_{}.mdl'.format(batch_idx + 1))
             model.save(new_model_fname)
             _dump_val_metrics(summary_writer, new_eval_metrics, batch_idx + 1)
@@ -280,7 +301,7 @@ def train(args, sets):
 
     LOGGER.info('Best model is in %s', prev_model_fname)
     model.load(prev_model_fname)
-    test_metrics = evaluate(model, sets[DatasetTag.TEST])
+    test_metrics = evaluate(model, sets[DatasetTag.TEST], collate_fn)
     with open(os.path.join(args.traindir, 'test_metrics.json'), 'w') as fout:
         json.dump({m.value: value for m, value in test_metrics.items()}, fout)
 
@@ -299,7 +320,11 @@ def main(args):
         for tag in DatasetTag
     ]
 
-    train(args, sets)
+    try:
+        train(args, sets)
+    except Exception as e:
+        LOGGER.exception(e)
+        raise
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
