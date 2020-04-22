@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.8
+#!/usr/bin/env python3
 """Train keyword spotter."""
 import argparse
 import logging
@@ -31,6 +31,7 @@ DEV_EVERY_BATCHES = 1024
 def collate_fn(samples):
     x, y = [], []
     for sample in samples:
+        #print(type(sample['data'].reshape(1, -1)), sample['data'].reshape(1, -1).size)
         x.append(
             torchaudio.compliance.kaldi.fbank(
                 torch.from_numpy(sample['data'].reshape(1, -1)),
@@ -98,10 +99,14 @@ def evaluate(model, dataset):
         collate_fn=collate_fn
     )
     model.eval()
+    torch.cuda.set_device(0)
+    model.cuda()
     loss_sum = 0.
     nbatches = 0
     criterion = nn.CrossEntropyLoss()
     for i, (x, y) in enumerate(loader):
+        torch.cuda.set_device(0)
+        x, y = x.cuda(), y.cuda()
         scores = model(x)
         loss = criterion(scores, y)
         loss_sum += loss.item()
@@ -137,12 +142,13 @@ def train(args, sets):
         lr=curlr,
     )
 
+    model.cuda()
     for batch_idx, (x, y) in enumerate(loader):
         model.train()
         optimizer.zero_grad()
-        x = Variable(x, requires_grad=False)
+        x = Variable(x, requires_grad=False).cuda()
         scores = model(x)
-        y = Variable(y, requires_grad=False)
+        y = Variable(y, requires_grad=False).cuda()
         loss = criterion(scores, y)
         loss.backward()
         optimizer.step()

@@ -8,7 +8,7 @@ import os
 import re
 
 import torch
-import librosa
+import torchaudio
 import numpy as np
 
 from .common import DatasetTag
@@ -138,7 +138,10 @@ class GoogleSpeechCommandsDataset(torch.utils.data.IterableDataset):
     def _read_audio(self, fname):
         if fname in self._cache:
             return self._cache[fname]
-        data = librosa.core.load(fname, sr=SAMPLE_RATE)[0]
+        waveform, sample_rate = torchaudio.load(fname)
+        if sample_rate != SAMPLE_RATE:
+            raise ValueError(f'{fname} has sample rate {sample_rate}, not {SAMPLE_RATE}')
+        data = waveform[0].numpy()
         self._cache[fname] = data
         return data
 
