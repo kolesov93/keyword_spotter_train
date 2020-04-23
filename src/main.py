@@ -6,6 +6,7 @@ import enum
 import json
 import logging
 import os
+import faulthandler
 
 from typing import Dict
 
@@ -32,7 +33,7 @@ WANTED_WORDS = 'yes,no,up,down,left,right,on,off,stop,go'.split(',')
 
 DEV_EVERY_BATCHES = 1024
 DUMP_SUMMARY_EVERY_STEPS = 20
-MAX_PLATEAUS = 6
+MAX_PLATEAUS = 2
 
 class Metrics(enum.Enum):
     ACCURACY = 'accuracy'
@@ -50,7 +51,6 @@ def make_collate_fn(args):
                     num_mel_bins=args.num_mel_bins,
                     frame_shift=args.frame_shift,
                     frame_length=args.frame_length,
-                    dither=0.
                 ).reshape(1, -1, args.num_mel_bins)
             )
             y.append(sample['label'])
@@ -195,6 +195,7 @@ def _initialize_logging(traindir):
 
 
 def train(args, sets):
+    torch.set_num_threads(8)
     if os.path.exists(args.traindir):
         raise ValueError(f'{args.traindir} already exists')
 
@@ -328,4 +329,5 @@ def main(args):
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
+    faulthandler.enable()
     main(_parse_args())
