@@ -6,6 +6,7 @@ import random
 import subprocess as sp
 import multiprocessing
 import shutil
+import faulthandler
 
 
 def f(cmd):
@@ -32,6 +33,7 @@ def f_init(gpu_queue):
 
 
 def main():
+    faulthandler.enable()
     GPUS = list(range(8))
     cmds = [line.strip() for line in sys.stdin]
 

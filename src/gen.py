@@ -15,7 +15,7 @@ for lr in [0.05, 0.1, 0.2]:
 
     for frame_length in np.arange(5, 50, 2):
         for frame_shift in [10]:
-            for fbins in [40, 80]:
+            for bins in [40, 80]:
                 args.append(
                     {'lr': lr, 'frame-length': frame_length, 'frame-shift': frame_shift, 'num-mel-bins': bins}
                 )
