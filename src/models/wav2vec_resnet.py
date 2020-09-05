@@ -1,8 +1,7 @@
 import torch.nn as nn
 import torch
 import torchaudio
-from fairseq.models.wav2vec.wav2vec2 import Wav2Vec2Model
-
+from fairseq.models.wav2vec import Wav2VecModel
 
 RES8_CONFIG = dict(n_labels=12, n_layers=6, n_feature_maps=45, res_pool=(4, 3), use_dilation=False)
 import torch.nn.functional as F
@@ -17,10 +16,12 @@ class SerializableModule(nn.Module):
     def load(self, filename):
         self.load_state_dict(torch.load(filename, map_location=lambda storage, loc: storage))
 
-class SpeechResModel(SerializableModule):
+class ResnetModel(SerializableModule):
     def __init__(self, config):
         super().__init__()
         n_labels = config["n_labels"]
+        self._init_feature_extractor(config['model_path'])
+
         n_maps = config["n_feature_maps"]
         self.conv0 = nn.Conv2d(1, n_maps, (3, 3), padding=(1, 1), bias=False)
         self.fbank_conv0 = nn.Conv2d(1, n_maps, (3, 3), padding=(1, 1), bias=False)
@@ -42,18 +43,18 @@ class SpeechResModel(SerializableModule):
 
         self.output = nn.Linear(n_maps, n_labels)
 
+    def _init_feature_extractor(self, model_path):
+        cp = torch.load(model_path)
+        model = Wav2VecModel.build_model(cp['args'], task=None)
+        model.load_state_dict(cp['model'])
+        model.eval()
+        self._feature_extractor = model.feature_extractor
+        self._feature_aggregator = model.feature_aggregator
+
     def forward(self, x):
-        fbanks = []
-        for channel in x:
-            fbanks.append(
-                torchaudio.compliance.kaldi.fbank(
-                    channel.reshape(1, -1),
-                    num_mel_bins=80,
-                    frame_shift=10,
-                    frame_length=25
-                )
-            )
-        x = torch.stack(fbanks)
+        x = self._feature_extractor(x)
+        x = self._feature_aggregator(x)
+        x = x.permute(0, 2, 1)
 
         x = x.unsqueeze(1)
         for i in range(self.n_layers + 1):
@@ -71,3 +72,4 @@ class SpeechResModel(SerializableModule):
                 x = getattr(self, "bn{}".format(i))(x)
         x = x.view(x.size(0), x.size(1), -1) # shape: (batch, feats, o3)
         return self.output(torch.mean(x, 2))
+

@@ -23,6 +23,9 @@ import data.google_speech_commands as gsc
 from data.common import DatasetTag
 
 import models.resnet as resnet
+import models.wav2vec as model_wav2vec
+import models.wav2vec_resnet as model_wav2vec_resnet
+import models.fbank_ff as model_fbank_ff
 
 LOGGER = logging.getLogger('spotter_train')
 
@@ -38,6 +41,28 @@ MAX_PLATEAUS = 2
 class Metrics(enum.Enum):
     ACCURACY = 'accuracy'
     XENT = 'xent'
+
+
+MODEL_PATH = '/home/kolesov93/study/wav2vec_models/wav2vec_small.pt'
+
+def make_wav2vec_collate_fn(args):
+    # cp = torch.load(MODEL_PATH)
+    # model = Wav2Vec2Model.build_model(cp['args'])
+    # model.eval()
+
+    def collate_fn(samples):
+        x, y = [], []
+        for sample in samples:
+            x.append(sample['data'].reshape(-1))
+            y.append(sample['label'])
+
+        x = np.array(x)
+        #features = model.feature_extractor(torch.tensor(np.array(x)))
+        #x = features.permute(0, 2, 1)
+        y = np.array(y, dtype=np.int64)
+        return torch.from_numpy(x), torch.from_numpy(y)
+
+    return collate_fn
 
 
 def make_collate_fn(args):
@@ -62,11 +87,15 @@ def make_collate_fn(args):
 
 def _parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--limit', type=int, default=None, help='leave this number of samples per word')
     parser.add_argument('--batch-size', type=int, default=64, help='batch size')
     parser.add_argument('--lr', type=float, default=1e-1, help='starting learning rate')
     parser.add_argument('--frame-length', type=float, default=25., help='frame length in ms')
     parser.add_argument('--frame-shift', type=float, default=10., help='frame shift in ms')
     parser.add_argument('--num-mel-bins', type=int, default=80, help='num mel filters')
+    parser.add_argument('--model-path', default=None)
+    parser.add_argument('--use-fbank', action='store_true')
+    parser.add_argument('--use-resnet', action='store_true')
     parser.add_argument('data', help='path/to/google_speech_command/dataset')
     parser.add_argument('traindir', help='path/to/traindir')
     return parser.parse_args()
@@ -207,11 +236,21 @@ def train(args, sets):
     with open(os.path.join(args.traindir, 'options.json'), 'w') as fout:
         json.dump(vars(args), fout)
 
-    collate_fn = make_collate_fn(args)
+    collate_fn = make_wav2vec_collate_fn(args)
 
     config = copy.deepcopy(resnet.RES8_CONFIG)
     config['n_labels'] = len(WANTED_WORDS) + 2
-    model = resnet.SpeechResModel(config)
+    config['model_path'] = args.model_path
+    if args.use_fbank:
+        if args.use_resnet:
+            model = resnet.SpeechResModel(config)
+        else:
+            model = model_fbank_ff.FbankFFModel(config)
+    else:
+        if args.use_resnet:
+            model = model_wav2vec_resnet.ResnetModel(config)
+        else:
+            model = model_wav2vec.FFModel(config)
 
     prev_eval_metrics = evaluate(model, sets[DatasetTag.DEV], collate_fn)
     _dump_val_metrics(summary_writer, prev_eval_metrics, 0)
@@ -311,7 +350,7 @@ def main(args):
     """Run train."""
     LOGGER.setLevel(logging.INFO)
 
-    indexes = gsc.split_index(gsc.get_index(args.data), DEV_PERCENTAGE, TEST_PERCENTAGE)
+    indexes = gsc.split_index(gsc.get_index(args.data, args.limit), DEV_PERCENTAGE, TEST_PERCENTAGE)
     sets = [
         gsc.GoogleSpeechCommandsDataset(
             indexes[tag],

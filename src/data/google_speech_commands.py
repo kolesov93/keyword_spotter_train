@@ -1,6 +1,6 @@
 """Load Google Speech Command dataset."""
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 import hashlib
 import logging
 import math
@@ -219,7 +219,7 @@ class GoogleSpeechCommandsDataset(torch.utils.data.IterableDataset):
                 yield self._get_command_sample(samples[rnd.choice(len(samples))], rnd, add_noise)
 
 
-def get_index(folder: str) -> Index:
+def get_index(folder: str, limit: Optional[int] = None) -> Index:
     """For each label returns list of file paths."""
     result = {}
 
@@ -239,6 +239,17 @@ def get_index(folder: str) -> Index:
                 result[subfolder_name].append(fname)
             else:
                 result[subfolder_name] = [fname]
+
+    if limit is not None:
+        nresult = {}
+        for tag, names in result.items():
+            if tag != '_background_noise_':
+                np.random.seed(1993)
+                np.random.shuffle(names)
+                nresult[tag] = names[:limit]
+            else:
+                nresult[tag] = names
+        return nresult
 
     return result
 
