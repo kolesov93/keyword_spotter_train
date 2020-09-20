@@ -219,7 +219,7 @@ class GoogleSpeechCommandsDataset(torch.utils.data.IterableDataset):
                 yield self._get_command_sample(samples[rnd.choice(len(samples))], rnd, add_noise)
 
 
-def get_index(folder: str, limit: Optional[int] = None) -> Index:
+def get_index(folder: str) -> Index:
     """For each label returns list of file paths."""
     result = {}
 
@@ -240,17 +240,6 @@ def get_index(folder: str, limit: Optional[int] = None) -> Index:
             else:
                 result[subfolder_name] = [fname]
 
-    if limit is not None:
-        nresult = {}
-        for tag, names in result.items():
-            if tag != '_background_noise_':
-                np.random.seed(1993)
-                np.random.shuffle(names)
-                nresult[tag] = names[:limit]
-            else:
-                nresult[tag] = names
-        return nresult
-
     return result
 
 
@@ -269,7 +258,7 @@ def which_set(fname: str, dev_percentage: float, test_percentage: float) -> Data
     return DatasetTag.TRAIN
 
 
-def split_index(index: Index, dev_percentage: float, test_percentage: float) -> Tuple[Index, Index, Index]:
+def split_index(index: Index, dev_percentage: float, test_percentage: float, limit: Optional[int]) -> Tuple[Index, Index, Index]:
     """Split whole index into train/dev/test."""
     result = {}, {}, {}
     for label, fnames in index.items():
@@ -281,5 +270,9 @@ def split_index(index: Index, dev_percentage: float, test_percentage: float) -> 
                 for cresult in result:
                     cresult[label].append(fname)
             else:
-                result[which_set(fname, dev_percentage, test_percentage)][label].append(fname)
+                tag = which_set(fname, dev_percentage, test_percentage)
+                if tag == DatasetTag.TRAIN and limit is not None and len(result[tag][label]) >= limit:
+                    pass
+                else:
+                    result[tag][label].append(fname)
     return result

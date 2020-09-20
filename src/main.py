@@ -3,10 +3,12 @@
 import argparse
 import copy
 import enum
+import faulthandler
 import json
 import logging
+import math
 import os
-import faulthandler
+import sys
 
 from typing import Dict
 
@@ -32,9 +34,9 @@ LOGGER = logging.getLogger('spotter_train')
 DEV_PERCENTAGE = 10.
 TEST_PERCENTAGE = 10.
 
-WANTED_WORDS = 'yes,no,up,down,left,right,on,off,stop,go'.split(',')
+WANTED_WORDS = 'yes,no,up,down,left,right,on,off,stop,go'
 
-DEV_EVERY_BATCHES = 1024
+DEV_EVERY_BATCHES = 128
 DUMP_SUMMARY_EVERY_STEPS = 20
 MAX_PLATEAUS = 2
 
@@ -94,8 +96,12 @@ def _parse_args():
     parser.add_argument('--frame-shift', type=float, default=10., help='frame shift in ms')
     parser.add_argument('--num-mel-bins', type=int, default=80, help='num mel filters')
     parser.add_argument('--model-path', default=None)
+    parser.add_argument(
+        '--model', required=True,
+        choices='res8,res8_narrow,res15,res15_narrow,res26,res26_narrow,ff'.split(',')
+    )
     parser.add_argument('--use-fbank', action='store_true')
-    parser.add_argument('--use-resnet', action='store_true')
+    parser.add_argument('--wanted-words', default=WANTED_WORDS)
     parser.add_argument('data', help='path/to/google_speech_command/dataset')
     parser.add_argument('traindir', help='path/to/traindir')
     return parser.parse_args()
@@ -223,6 +229,34 @@ def _initialize_logging(traindir):
     LOGGER.addHandler(handler)
 
 
+def _get_model(args):
+    if args.model in ['ff', 'res8']:
+        config = copy.deepcopy(resnet.RES8_CONFIG)
+    elif args.model == 'res8_narrow':
+        config = copy.deepcopy(resnet.RES8_NARROW_CONFIG)
+    elif args.model == 'res15':
+        config = copy.deepcopy(resnet.RES15_CONFIG)
+    elif args.model == 'res15_narrow':
+        config = copy.deepcopy(resnet.RES15_NARROW_CONFIG)
+    elif args.model == 'res26':
+        config = copy.deepcopy(resnet.RES26_CONFIG)
+    elif args.model == 'res26_narrow':
+        config = copy.deepcopy(resnet.RES26_NARROW_CONFIG)
+    config['n_labels'] = len(args.wanted_words) + 2
+    config['model_path'] = args.model_path
+    if args.use_fbank:
+        if args.model == 'ff':
+            model = model_fbank_ff.FbankFFModel(config)
+        else:
+            model = resnet.SpeechResModel(config)
+    else:
+        if args.model == 'ff':
+            model = model_wav2vec.FFModel(config)
+        else:
+            model = model_wav2vec_resnet.ResnetModel(config)
+    return model
+
+
 def train(args, sets):
     torch.set_num_threads(8)
     if os.path.exists(args.traindir):
@@ -238,19 +272,7 @@ def train(args, sets):
 
     collate_fn = make_wav2vec_collate_fn(args)
 
-    config = copy.deepcopy(resnet.RES8_CONFIG)
-    config['n_labels'] = len(WANTED_WORDS) + 2
-    config['model_path'] = args.model_path
-    if args.use_fbank:
-        if args.use_resnet:
-            model = resnet.SpeechResModel(config)
-        else:
-            model = model_fbank_ff.FbankFFModel(config)
-    else:
-        if args.use_resnet:
-            model = model_wav2vec_resnet.ResnetModel(config)
-        else:
-            model = model_wav2vec.FFModel(config)
+    model = _get_model(args)
 
     prev_eval_metrics = evaluate(model, sets[DatasetTag.DEV], collate_fn)
     _dump_val_metrics(summary_writer, prev_eval_metrics, 0)
@@ -314,7 +336,7 @@ def train(args, sets):
             with open(os.path.join(args.traindir, 'dev_metrics_{}.json'.format(batch_idx + 1)), 'w') as fout:
                 json.dump({m.value: value for m, value in new_eval_metrics.items()}, fout)
 
-            if new_eval_metrics[Metrics.ACCURACY] < prev_eval_metrics[Metrics.ACCURACY]:
+            if new_eval_metrics[Metrics.ACCURACY] < prev_eval_metrics[Metrics.ACCURACY] or math.isnan(new_eval_metrics[Metrics.XENT]):
                 nplateaus += 1
                 if nplateaus > MAX_PLATEAUS:
                     LOGGER.warning('Hitted plateau %d times, exiting', nplateaus)
@@ -326,7 +348,7 @@ def train(args, sets):
                     momentum=0.9
                 )
                 LOGGER.warning(
-                    'Accuracy is getting worse (%.02f vs %.02f), decreasing lr to: %f',
+                    'Accuracy is getting worse (%.02f vs %.02f) or xent is nan, decreasing lr to: %f',
                     new_eval_metrics[Metrics.ACCURACY],
                     prev_eval_metrics[Metrics.ACCURACY],
                     curlr
@@ -345,16 +367,22 @@ def train(args, sets):
     with open(os.path.join(args.traindir, 'test_metrics.json'), 'w') as fout:
         json.dump({m.value: value for m, value in test_metrics.items()}, fout)
 
+    for fname in os.listdir(args.traindir):
+        if fname.endswith('mdl'):
+            os.unlink(os.path.join(args.traindir, fname))
+
 
 def main(args):
     """Run train."""
     LOGGER.setLevel(logging.INFO)
+    LOGGER.info(sys.argv)
+    args.wanted_words = args.wanted_words.split(',')
 
-    indexes = gsc.split_index(gsc.get_index(args.data, args.limit), DEV_PERCENTAGE, TEST_PERCENTAGE)
+    indexes = gsc.split_index(gsc.get_index(args.data), DEV_PERCENTAGE, TEST_PERCENTAGE, args.limit)
     sets = [
         gsc.GoogleSpeechCommandsDataset(
             indexes[tag],
-            WANTED_WORDS,
+            args.wanted_words,
             tag
         )
         for tag in DatasetTag

@@ -5,6 +5,12 @@ from fairseq.models.wav2vec.wav2vec2 import Wav2Vec2Model
 
 
 RES8_CONFIG = dict(n_labels=12, n_layers=6, n_feature_maps=45, res_pool=(4, 3), use_dilation=False)
+RES8_NARROW_CONFIG = dict(n_labels=12, n_layers=6, n_feature_maps=19, res_pool=(4, 3), use_dilation=False),
+RES15_CONFIG = dict(n_labels=12, use_dilation=True, n_layers=13, n_feature_maps=45),
+RES15_NARROW_CONFIG = dict(n_labels=12, use_dilation=True, n_layers=13, n_feature_maps=19),
+RES26_CONFIG = dict(n_labels=12, n_layers=24, n_feature_maps=45, res_pool=(2, 2), use_dilation=False),
+RES26_NARROW_CONFIG = dict(n_labels=12, n_layers=24, n_feature_maps=19, res_pool=(2, 2), use_dilation=False)
+
 import torch.nn.functional as F
 
 class SerializableModule(nn.Module):
