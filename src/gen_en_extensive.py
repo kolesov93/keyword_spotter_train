@@ -20,30 +20,36 @@ LANGUAGES = {
 MODELS = ['ff', 'res8', 'res8_narrow', 'res15', 'res15_narrow', 'res26', 'res26_narrow']
 LIMITS = [None, 3, 5, 7, 10, 20]
 LRS = [0.1, 0.01]
-BATCH_SIZES = [32, 64]
+BATCH_SIZES = [16, 32, 64, 128]
 
 args = []
-T = 100
+T = 2000
 
-for limit in LIMITS:
-    for model in MODELS:
-        for lang in LANGUAGES:
-            for lr in LRS:
-                for batch_size in BATCH_SIZES:
-                    for use_fbank in [False, True]:
-                        new_args = {
-                            'lr': lr,
-                            'batch-size': batch_size,
-                            'model-path': WAV2VEC_MODEL_PATH,
-                            'wanted-words': LANGUAGES[lang]['words'],
-                            'language': lang,
-                            'model': model
-                        }
-                        if limit is not None:
-                            new_args['limit'] = limit
-                        if use_fbank:
-                            new_args['use-fbank'] = None
-                        args.append(new_args)
+for _ in range(T):
+    # limit = np.random.choice(LIMITS)
+    limit = None
+    model = np.random.choice(MODELS)
+    lr = 10 ** np.random.uniform(-3., 0.)
+    lr_drop = np.random.uniform(1.1, 10.0)
+    dev_every_batches = 2 ** np.random.randint(7, 12)
+    batch_size = 2 ** np.random.randint(4, 7)
+    lang = 'en'
+    use_fbank = np.random.choice([False, True])
+    new_args = {
+        'lr': lr,
+        'batch-size': batch_size,
+        'model-path': WAV2VEC_MODEL_PATH,
+        'wanted-words': LANGUAGES[lang]['words'],
+        'language': lang,
+        'lr-drop': lr_drop,
+        'model': model,
+        'dev-every-batches': dev_every_batches
+    }
+    if limit is not None:
+        new_args['limit'] = limit
+    if use_fbank:
+        new_args['use-fbank'] = None
+    args.append(new_args)
 
 def _make_traindir(args):
     tokens = []
@@ -57,6 +63,8 @@ def _make_traindir(args):
         tokens.append('limit{}'.format(args['limit']))
     tokens.append('batch{}'.format(args['batch-size']))
     tokens.append('lr{}'.format(args['lr']))
+    tokens.append('lr_drop{}'.format(args['lr-drop']))
+    tokens.append('dev_every_batches{}'.format(args['dev-every-batches']))
     return '_'.join(tokens)
 
 cmds = []

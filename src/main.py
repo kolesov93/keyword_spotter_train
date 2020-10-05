@@ -36,9 +36,8 @@ TEST_PERCENTAGE = 10.
 
 WANTED_WORDS = 'yes,no,up,down,left,right,on,off,stop,go'
 
-DEV_EVERY_BATCHES = 128
 DUMP_SUMMARY_EVERY_STEPS = 20
-MAX_PLATEAUS = 2
+MAX_PLATEAUS = 5
 
 class Metrics(enum.Enum):
     ACCURACY = 'accuracy'
@@ -95,6 +94,8 @@ def _parse_args():
     parser.add_argument('--frame-length', type=float, default=25., help='frame length in ms')
     parser.add_argument('--frame-shift', type=float, default=10., help='frame shift in ms')
     parser.add_argument('--num-mel-bins', type=int, default=80, help='num mel filters')
+    parser.add_argument('--dev-every-batches', type=int, default=128, help='dev every batches')
+    parser.add_argument('--lr-drop', type=float, default=1.5, help='decrease lr if platuea')
     parser.add_argument('--model-path', default=None)
     parser.add_argument(
         '--model', required=True,
@@ -328,7 +329,7 @@ def train(args, sets):
                 batch_idx + 1
             )
 
-        if (batch_idx + 1) % DEV_EVERY_BATCHES == 0:
+        if (batch_idx + 1) % args.dev_every_batches == 0:
             new_eval_metrics = evaluate(model, sets[DatasetTag.DEV], collate_fn)
             new_model_fname = os.path.join(args.traindir, 'model_{}.mdl'.format(batch_idx + 1))
             model.save(new_model_fname)
@@ -341,7 +342,7 @@ def train(args, sets):
                 if nplateaus > MAX_PLATEAUS:
                     LOGGER.warning('Hitted plateau %d times, exiting', nplateaus)
                     break
-                curlr = curlr / 1.5
+                curlr = curlr / args.lr_drop
                 optimizer = torch.optim.SGD(
                     model.parameters(),
                     lr=curlr,

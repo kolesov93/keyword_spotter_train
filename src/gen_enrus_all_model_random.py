@@ -23,27 +23,28 @@ LRS = [0.1, 0.01]
 BATCH_SIZES = [32, 64]
 
 args = []
-T = 100
+T = 2000
 
-for limit in LIMITS:
-    for model in MODELS:
-        for lang in LANGUAGES:
-            for lr in LRS:
-                for batch_size in BATCH_SIZES:
-                    for use_fbank in [False, True]:
-                        new_args = {
-                            'lr': lr,
-                            'batch-size': batch_size,
-                            'model-path': WAV2VEC_MODEL_PATH,
-                            'wanted-words': LANGUAGES[lang]['words'],
-                            'language': lang,
-                            'model': model
-                        }
-                        if limit is not None:
-                            new_args['limit'] = limit
-                        if use_fbank:
-                            new_args['use-fbank'] = None
-                        args.append(new_args)
+for _ in range(T):
+    limit = np.random.choice(LIMITS)
+    model = np.random.choice(MODELS)
+    lr = 10 ** np.random.uniform(-3., 0.)
+    batch_size = 2 ** np.random.randint(5, 9)
+    lang = np.random.choice(list(LANGUAGES.keys()))
+    use_fbank = np.random.choice([False, True])
+    new_args = {
+        'lr': lr,
+        'batch-size': batch_size,
+        'model-path': WAV2VEC_MODEL_PATH,
+        'wanted-words': LANGUAGES[lang]['words'],
+        'language': lang,
+        'model': model
+    }
+    if limit is not None:
+        new_args['limit'] = limit
+    if use_fbank:
+        new_args['use-fbank'] = None
+    args.append(new_args)
 
 def _make_traindir(args):
     tokens = []
