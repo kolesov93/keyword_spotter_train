@@ -88,6 +88,7 @@ def make_collate_fn(args):
 
 def _parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--initialize-body', type=str, default=None, help='path/to/mdl to initialize body (without head) with')
     parser.add_argument('--limit', type=int, default=None, help='leave this number of samples per word')
     parser.add_argument('--batch-size', type=int, default=64, help='batch size')
     parser.add_argument('--lr', type=float, default=1e-1, help='starting learning rate')
@@ -276,6 +277,10 @@ def train(args, sets):
     collate_fn = make_wav2vec_collate_fn(args)
 
     model = _get_model(args)
+    if args.initialize_body:
+        LOGGER.info('Initializing body from %s', args.initialize_body)
+        model.load(args.initialize_body, without_head=True)
+        LOGGER.info('Done')
 
     prev_eval_metrics = evaluate(model, sets[DatasetTag.DEV], collate_fn)
     _dump_val_metrics(summary_writer, prev_eval_metrics, 0)
@@ -340,7 +345,7 @@ def train(args, sets):
             with open(os.path.join(args.traindir, 'dev_metrics_{}.json'.format(batch_idx + 1)), 'w') as fout:
                 json.dump({m.value: value for m, value in new_eval_metrics.items()}, fout)
 
-            if new_eval_metrics[Metrics.ACCURACY] < prev_eval_metrics[Metrics.ACCURACY] or math.isnan(new_eval_metrics[Metrics.XENT]):
+            if new_eval_metrics[Metrics.ACCURACY] <= prev_eval_metrics[Metrics.ACCURACY] or math.isnan(new_eval_metrics[Metrics.XENT]):
                 nplateaus += 1
                 if nplateaus > MAX_PLATEAUS:
                     LOGGER.warning('Hitted plateau %d times, exiting', nplateaus)
@@ -362,6 +367,8 @@ def train(args, sets):
                     'Reloaded model from %s', prev_model_fname
                 )
             else:
+                if prev_model_fname != new_model_fname:
+                    os.unlink(prev_model_fname)
                 prev_eval_metrics = new_eval_metrics
                 prev_model_fname = new_model_fname
 
@@ -376,8 +383,10 @@ def train(args, sets):
         json.dump({m.value: value for m, value in test_metrics.items()}, fout)
 
     for fname in os.listdir(args.traindir):
-        if fname.endswith('mdl'):
+        if fname.endswith('.mdl'):
             os.unlink(os.path.join(args.traindir, fname))
+
+    model.save(os.path.join(args.traindir, 'final.mdl'))
 
 
 def main(args):
