@@ -275,4 +275,12 @@ def split_index(index: Index, dev_percentage: float, test_percentage: float, lim
                     pass
                 else:
                     result[tag][label].append(fname)
+
+    for tag in [DatasetTag.TRAIN, DatasetTag.DEV, DatasetTag.TEST]:
+        sumcnt = 0
+        for label in result[tag]:
+            LOGGER.info('%d records for %s/%s', len(result[tag][label]), tag, label)
+            sumcnt += len(result[tag][label])
+        LOGGER.info('%d records for %s', sumcnt, tag)
+
     return result
