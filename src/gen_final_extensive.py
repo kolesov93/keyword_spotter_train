@@ -16,8 +16,8 @@ LANGUAGES = {
         'data': '/home/kolesov93/study/datasets/data'
     },
     'lt': {
-        'words': 'ne,ačiū,stop,įjunk,išjunk,į_viršų,į_apačią,į_dešinę,į_kairę,startas,pauzė,labas,iki',
-        'data': '/home/kolesov93/study/datasets/lt_data'
+        'words': 'nulis,vienas,du,trys,keturi,penki,taip,ne,ačiū,stop,įjunk,išjunk,į_viršų_,į_apačią,į_dešinę,į_kairę,startas,pauzė,labas,iki',
+        'data': '/home/kolesov93/study/datasets/rus_data'
     }
 }
 
@@ -36,9 +36,22 @@ for _ in range(T):
     lr_drop = np.random.uniform(1.1, 10.0)
     dev_every_batches = 2 ** np.random.randint(3, 12)
     batch_size = 2 ** np.random.randint(4, 7)
-    # lang = np.random.choice(list(LANGUAGES.keys()))
-    lang = 'lt'
+    lang = np.random.choice(list(LANGUAGES.keys()))
     use_fbank = np.random.choice([False, True])
+
+    if np.random.randint(0, 100) < 25:
+        limit = None
+        lang = 'ru'
+        model = np.random.choice(['res8', 'res8_narrow', 'res15', 'res15_narrow'])
+        if model == 'res8':
+            use_fbank = True
+        else:
+            use_fbank = False
+    else:
+        model = np.random.choice(['res8', 'res8_narrow', 'res15', 'res15_narrow'])
+        lang = np.random.choice(['ru', 'en'])
+        limit = np.random.choice([15, 25, 30, 50, 75, 100])
+
     new_args = {
         'lr': lr,
         'batch-size': batch_size,

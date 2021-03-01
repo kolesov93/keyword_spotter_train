@@ -36,9 +36,9 @@ for _ in range(T):
     lr_drop = np.random.uniform(1.1, 10.0)
     dev_every_batches = 2 ** np.random.randint(3, 12)
     batch_size = 2 ** np.random.randint(4, 7)
-    # lang = np.random.choice(list(LANGUAGES.keys()))
     lang = 'lt'
     use_fbank = np.random.choice([False, True])
+
     new_args = {
         'lr': lr,
         'batch-size': batch_size,

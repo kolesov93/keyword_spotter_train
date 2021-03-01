@@ -26,6 +26,10 @@ LIMITS = [None, 3, 5, 7, 10, 20]
 LRS = [0.1, 0.01]
 BATCH_SIZES = [16, 32, 64, 128]
 
+LRS = [0.1, 0.01, 0.001, 0.0003]
+MODELS = ['ff', 'res8', 'res15', 'res26_narrow']
+LIMITS = [None, 10, 20]
+
 args = []
 T = 2000
 
@@ -34,11 +38,11 @@ for _ in range(T):
     model = np.random.choice(MODELS)
     lr = 10 ** np.random.uniform(-3., 0.)
     lr_drop = np.random.uniform(1.1, 10.0)
-    dev_every_batches = 2 ** np.random.randint(3, 12)
+    dev_every_batches = 2 ** np.random.randint(7, 12)
     batch_size = 2 ** np.random.randint(4, 7)
-    # lang = np.random.choice(list(LANGUAGES.keys()))
-    lang = 'lt'
-    use_fbank = np.random.choice([False, True])
+    lang = np.random.choice(list(LANGUAGES.keys()))
+    # use_fbank = np.random.choice([False, True])
+    use_fbank = True
     new_args = {
         'lr': lr,
         'batch-size': batch_size,
@@ -82,7 +86,7 @@ for i, cargs in enumerate(args):
             cmd.append(str(v))
 
     cmd.append(LANGUAGES[language]['data'])
-    cmd.append('traindirs/{:03d}_{}'.format(i, traindir))
+    cmd.append('uns_baseline_traindirs/{:03d}_{}'.format(i, traindir))
     cmds.append(' '.join(cmd))
 
 for cmd in cmds:

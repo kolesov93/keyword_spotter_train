@@ -96,6 +96,8 @@ def _parse_args():
     parser.add_argument('--num-mel-bins', type=int, default=80, help='num mel filters')
     parser.add_argument('--dev-every-batches', type=int, default=128, help='dev every batches')
     parser.add_argument('--lr-drop', type=float, default=1.5, help='decrease lr if platuea')
+    parser.add_argument('--min-lr', type=float, default=1e-8, help='stop the training if lr is less than this value')
+    parser.add_argument('--max-batches', type=int, default=60000, help='stop the training if the number of batches is bigger than this value')
     parser.add_argument('--model-path', default=None)
     parser.add_argument(
         '--model', required=True,
@@ -329,7 +331,8 @@ def train(args, sets):
                 batch_idx + 1
             )
 
-        if (batch_idx + 1) % args.dev_every_batches == 0:
+        force_stop = (curlr < args.min_lr) or (batch_idx + 1 > args.max_batches)
+        if (batch_idx + 1) % args.dev_every_batches == 0 or force_stop:
             new_eval_metrics = evaluate(model, sets[DatasetTag.DEV], collate_fn)
             new_model_fname = os.path.join(args.traindir, 'model_{}.mdl'.format(batch_idx + 1))
             model.save(new_model_fname)
@@ -361,6 +364,10 @@ def train(args, sets):
             else:
                 prev_eval_metrics = new_eval_metrics
                 prev_model_fname = new_model_fname
+
+            if force_stop:
+                LOGGER.warning('Training is force stopped. LR: %f, batches: %d', curlr, batch_idx + 1)
+                break
 
     LOGGER.info('Best model is in %s', prev_model_fname)
     model.load(prev_model_fname)

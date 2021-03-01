@@ -21,8 +21,13 @@ def main():
 
             opt_file = os.path.join(d, 'options.json')
             metrics_file = os.path.join(d, 'test_metrics.json')
-            if not (os.path.exists(opt_file) and os.path.exists(metrics_file)):
-                print('Skipping {}, some files absent'.format(d), file=sys.stderr)
+            skip = False
+            for path in [opt_file, metrics_file]:
+                if not os.path.exists(path):
+                    print('Skipping {}, {} is absent'.format(d, path), file=sys.stderr)
+                    skip = True
+                    break
+            if skip:
                 continue
 
             with open(opt_file) as fin:

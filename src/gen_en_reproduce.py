@@ -14,30 +14,26 @@ LANGUAGES = {
     'en': {
         'words': 'yes,no,up,down,left,right,on,off,stop,go',
         'data': '/home/kolesov93/study/datasets/data'
-    },
-    'lt': {
-        'words': 'ne,ačiū,stop,įjunk,išjunk,į_viršų,į_apačią,į_dešinę,į_kairę,startas,pauzė,labas,iki',
-        'data': '/home/kolesov93/study/datasets/lt_data'
     }
 }
 
 MODELS = ['ff', 'res8', 'res8_narrow', 'res15', 'res15_narrow', 'res26', 'res26_narrow']
-LIMITS = [None, 3, 5, 7, 10, 20]
+LIMITS = [None, 10, 20]
 LRS = [0.1, 0.01]
 BATCH_SIZES = [16, 32, 64, 128]
 
 args = []
-T = 2000
+T = 60
 
 for _ in range(T):
-    limit = np.random.choice(LIMITS)
+    # limit = np.random.choice(LIMITS)
+    limit = None
     model = np.random.choice(MODELS)
     lr = 10 ** np.random.uniform(-3., 0.)
     lr_drop = np.random.uniform(1.1, 10.0)
-    dev_every_batches = 2 ** np.random.randint(3, 12)
+    dev_every_batches = 2 ** np.random.randint(7, 12)
     batch_size = 2 ** np.random.randint(4, 7)
-    # lang = np.random.choice(list(LANGUAGES.keys()))
-    lang = 'lt'
+    lang = 'en'
     use_fbank = np.random.choice([False, True])
     new_args = {
         'lr': lr,
@@ -82,7 +78,7 @@ for i, cargs in enumerate(args):
             cmd.append(str(v))
 
     cmd.append(LANGUAGES[language]['data'])
-    cmd.append('traindirs/{:03d}_{}'.format(i, traindir))
+    cmd.append('repro_traindirs/{:03d}_{}'.format(i, traindir))
     cmds.append(' '.join(cmd))
 
 for cmd in cmds:

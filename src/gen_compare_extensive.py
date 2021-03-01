@@ -16,8 +16,8 @@ LANGUAGES = {
         'data': '/home/kolesov93/study/datasets/data'
     },
     'lt': {
-        'words': 'ne,ačiū,stop,įjunk,išjunk,į_viršų,į_apačią,į_dešinę,į_kairę,startas,pauzė,labas,iki',
-        'data': '/home/kolesov93/study/datasets/lt_data'
+        'words': 'nulis,vienas,du,trys,keturi,penki,taip,ne,ačiū,stop,įjunk,išjunk,į_viršų_,į_apačią,į_dešinę,į_kairę,startas,pauzė,labas,iki',
+        'data': '/home/kolesov93/study/datasets/rus_data'
     }
 }
 
@@ -27,7 +27,7 @@ LRS = [0.1, 0.01]
 BATCH_SIZES = [16, 32, 64, 128]
 
 args = []
-T = 2000
+T = 100
 
 for _ in range(T):
     limit = np.random.choice(LIMITS)
@@ -36,24 +36,28 @@ for _ in range(T):
     lr_drop = np.random.uniform(1.1, 10.0)
     dev_every_batches = 2 ** np.random.randint(3, 12)
     batch_size = 2 ** np.random.randint(4, 7)
-    # lang = np.random.choice(list(LANGUAGES.keys()))
-    lang = 'lt'
+    lang = np.random.choice(list(LANGUAGES.keys()))
     use_fbank = np.random.choice([False, True])
-    new_args = {
-        'lr': lr,
-        'batch-size': batch_size,
-        'model-path': WAV2VEC_MODEL_PATH,
-        'wanted-words': LANGUAGES[lang]['words'],
-        'language': lang,
-        'lr-drop': lr_drop,
-        'model': model,
-        'dev-every-batches': dev_every_batches
-    }
-    if limit is not None:
-        new_args['limit'] = limit
-    if use_fbank:
-        new_args['use-fbank'] = None
-    args.append(new_args)
+
+    limit = np.random.randint(1, 100) * 5
+
+    for lang in ['ru', 'en']:
+        for use_fbank in [False, True]:
+            new_args = {
+                'lr': lr,
+                'batch-size': batch_size,
+                'model-path': WAV2VEC_MODEL_PATH,
+                'wanted-words': LANGUAGES[lang]['words'],
+                'language': lang,
+                'lr-drop': lr_drop,
+                'model': model,
+                'dev-every-batches': dev_every_batches
+            }
+            if limit is not None:
+                new_args['limit'] = limit
+            if use_fbank:
+                new_args['use-fbank'] = None
+            args.append(new_args)
 
 def _make_traindir(args):
     tokens = []
