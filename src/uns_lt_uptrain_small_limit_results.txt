@@ -1,0 +1,14 @@
+# find uns_lt_uptrain_small_limit_traindirs/ uns_lt_uptrain_traindirs/ -name "test_metrics.json" | ./parse_results.py --group-by limit uptrain --header > uns_lt_uptrain_small_limit_results.txt
+
+limit & uptrain & features & batch_size & dev_every_batches & model & lr & lr_drop & lang & accuracy & xent \\
+no & yes & fbank & 32 & 128 & \texttt{res15} & 0.0222 & 7.3376 & lt & 90.77% & 0.231 \\
+3 & no & fbank & 16 & 256 & \texttt{res15} & 0.2087 & 4.3722 & lt & 50.77% & 1.833 \\
+3 & yes & fbank & 16 & 1024 & \texttt{res8} & 0.5951 & 9.5590 & lt & 73.85% & 0.716 \\
+5 & no & fbank & 16 & 2048 & \texttt{res15} & 0.0209 & 1.5762 & lt & 70.77% & 0.865 \\
+5 & yes & fbank & 32 & 256 & \texttt{res15} & 0.0131 & 1.7844 & lt & 76.92% & 0.613 \\
+7 & no & fbank & 32 & 256 & \texttt{res15} & 0.0860 & 9.6408 & lt & 72.31% & 0.786 \\
+7 & yes & fbank & 16 & 2048 & \texttt{res8} & 0.0790 & 7.2608 & lt & 78.46% & 0.387 \\
+10 & no & fbank & 32 & 512 & \texttt{res15} & 0.0665 & 3.2235 & lt & 81.54% & 0.447 \\
+10 & yes & fbank & 32 & 512 & \texttt{res15} & 0.0038 & 1.4125 & lt & 90.77% & 0.337 \\
+20 & no & fbank & 16 & 1024 & \texttt{res15} & 0.0265 & 1.5065 & lt & 86.15% & 0.266 \\
+20 & yes & fbank & 64 & 2048 & \texttt{res8} & 0.7218 & 2.5966 & lt & 90.77% & 0.310 \\
