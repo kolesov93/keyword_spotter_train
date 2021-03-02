@@ -11,7 +11,7 @@ import torch
 import torchaudio
 import numpy as np
 
-from .common import DatasetTag
+from .common import DatasetTag, SAMPLE_RATE
 
 Index = Dict[str, List[str]]
 
@@ -28,8 +28,6 @@ UNKNOWN_PROB = 0.1
 
 SILENCE_LABEL = 0
 UNKNOWN_LABEL = 1
-
-SAMPLE_RATE = 16000
 
 NOISE_PROB = 0.7
 NOISE_COEF = 0.1
@@ -95,7 +93,7 @@ def _get_label(label: int, wanted_words: List[str]) -> str:
 
 
 def _ensure_duration(audio: np.array) -> np.array:
-    samples = SAMPLE_RATE # exactly one second
+    samples = SAMPLE_RATE  # exactly one second
 
     if len(audio) == samples:
         return audio
