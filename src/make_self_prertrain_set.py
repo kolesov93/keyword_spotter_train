@@ -8,7 +8,7 @@ import os
 
 def _parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('wav')
+    parser.add_argument('wav', nargs='+')
     parser.add_argument('n', type=int)
     parser.add_argument('data')
     return parser.parse_args()
@@ -19,8 +19,10 @@ def main():
     if os.path.exists(args.data):
         raise ValueError(f'{args.data} already exists')
 
-    duration = float(sp.check_output(['soxi', '-D', args.wav]))
-    print('Duration is {:.1f} seconds'.format(duration), file=sys.stderr)
+    durations = []
+    for wav in args.wav:
+        durations.append(float(sp.check_output(['soxi', '-D', wav])))
+    sum_durations = sum(durations)
 
     fname_len = len(str(args.n - 1))
     fmt = '{:0' + str(fname_len) + 'd}.wav'
@@ -28,10 +30,19 @@ def main():
     os.makedirs(args.data)
     with open(os.path.join(args.data, 'info'), 'w') as fout:
         for i in range(args.n):
-            start = np.random.uniform(0.0, duration - 1.1)
+            while True:
+                start = np.random.uniform(0.0, sum_durations)
+                chosen_wav = None
+                for i, duration in enumerate(durations):
+                    if start <= duration:
+                        chosen_wav = args.wav[i]
+                        break
+                if chosen_wav is not None and start + 1.1 < duration:
+                    break
+
             fname = os.path.join(args.data, fmt.format(i))
-            print(f'{i}\t{fname}\t{start}', file=fout)
-            sp.check_call(['sox', args.wav, fname, 'trim', '{:.4f}'.format(start), '1'])
+            print(f'{i}\t{fname}\t{chosen_wav}\t{start}', file=fout)
+            sp.check_call(['sox', chosen_wav, fname, 'trim', '{:.4f}'.format(start), '1'])
 
 
 if __name__ == '__main__':
