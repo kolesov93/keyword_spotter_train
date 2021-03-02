@@ -31,6 +31,10 @@ class SerializableModule(nn.Module):
 class SpeechResModel(SerializableModule):
     def __init__(self, config):
         super().__init__()
+        self._from_waveform = True
+        if config.get('from_fbank'):
+            self._from_waveform = False
+
         n_labels = config["n_labels"]
         n_maps = config["n_feature_maps"]
         self.conv0 = nn.Conv2d(1, n_maps, (3, 3), padding=(1, 1), bias=False)
@@ -54,17 +58,18 @@ class SpeechResModel(SerializableModule):
         self.output = nn.Linear(n_maps, n_labels)
 
     def forward(self, x):
-        fbanks = []
-        for channel in x:
-            fbanks.append(
-                torchaudio.compliance.kaldi.fbank(
-                    channel.reshape(1, -1),
-                    num_mel_bins=80,
-                    frame_shift=10,
-                    frame_length=25
+        if self._from_waveform:
+            fbanks = []
+            for channel in x:
+                fbanks.append(
+                    torchaudio.compliance.kaldi.fbank(
+                        channel.reshape(1, -1),
+                        num_mel_bins=80,
+                        frame_shift=10,
+                        frame_length=25
+                    )
                 )
-            )
-        x = torch.stack(fbanks)
+            x = torch.stack(fbanks)
 
         x = x.unsqueeze(1)
         for i in range(self.n_layers + 1):

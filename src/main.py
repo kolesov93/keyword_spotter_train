@@ -186,11 +186,15 @@ def _get_model(args):
     elif args.model == 'res26_narrow':
         config = copy.deepcopy(resnet.RES26_NARROW_CONFIG)
 
-    config['n_labels'] = len(args.wanted_words) + 2
+    if args.self_pretrain:
+        config['from_fbank'] = True
+        config['n_labels'] = len(list(fname for fname in os.listdir(args.data) if fname.endswith('.wav')))
+
+    else:
+        config['n_labels'] = len(args.wanted_words) + 2
     config['model_path'] = args.model_path
 
-    config['from_fbank'] = args.self_pretrain
-
+    LOGGER.info('Using config %s', config)
     if args.use_fbank:
         if args.model == 'ff':
             model = model_fbank_ff.FbankFFModel(config)
@@ -348,9 +352,9 @@ def main(args):
             if fname.endswith('.wav')
         ]))
         sets = {
-            DatasetTag.TRAIN: self.SelfPretrainDataset(paths, 1993, None, True),
-            DatasetTag.DEV: self.SelfPretrainDataset(paths, 1994, 100, True),
-            DatasetTag.TEST: self.SelfPretrainDataset(paths, 1995, 1, False),
+            DatasetTag.TRAIN: selfp.SelfPretrainDataset(paths, 1993, None, True),
+            DatasetTag.DEV: selfp.SelfPretrainDataset(paths, 1994, 10, True),
+            DatasetTag.TEST: selfp.SelfPretrainDataset(paths, 1995, 1, False),
         }
         sets = [
             sets[key]
