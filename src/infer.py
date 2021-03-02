@@ -28,6 +28,7 @@ LOGGER = logging.getLogger('spotter_infer')
 
 def _parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--sample-shift', type=int, default=8000, help='shift in samples (default: %(default)d)')
     parser.add_argument('model', help='path/to/final.mdl')
     parser.add_argument('options', help='path/to/options.json')
     parser.add_argument('wav', help='path/to/file.wav')
@@ -91,7 +92,7 @@ def infer(args):
     model.cuda()
 
     u2path = {'sample': args.wav}
-    dataset = InferenceDataset(u2path, 8000)
+    dataset = InferenceDataset(u2path, args.sample_shift)
     loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=32,
@@ -100,12 +101,15 @@ def infer(args):
 
     result = {}
     softmax = nn.Softmax(dim=1).cuda()
+    done = 0
     for x, sample_ids in loader:
         torch.cuda.set_device(0)
         x = x.cuda()
         scores = softmax(model(x)).detach().cpu().numpy()
         for sample_id, score in zip(sample_ids, scores):
             result[sample_id] = score
+        done += len(sample_ids)
+        LOGGER.info('Done %d samples', done)
 
     return result
 
@@ -124,12 +128,14 @@ def main(args):
     with open(args.options) as fin:
         options = json.load(fin)
 
-    header = ['uttid', '<sil>', '<unk>'] + options['wanted_words']
+    outputs = ['<sil>', '<unk>'] + options['wanted_words']
+    header = ['uttid'] + outputs + ['winner']
     rows = []
     for (uttid, shift), scores in result.items():
         row = ['{}-{}'.format(uttid, shift)]
         for score in scores:
             row.append('{:.2f}'.format(score))
+        row.append(outputs[np.argmax(scores)])
         rows.append(row)
 
     print(tabulate.tabulate(rows, headers=header))
