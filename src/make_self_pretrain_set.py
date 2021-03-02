@@ -29,7 +29,7 @@ def main():
     np.random.seed(1993)
     os.makedirs(args.data)
     with open(os.path.join(args.data, 'info'), 'w') as fout:
-        for i in range(args.n):
+        for j in range(args.n):
             while True:
                 start = np.random.uniform(0.0, sum_durations)
                 chosen_wav = None
@@ -40,8 +40,8 @@ def main():
                 if chosen_wav is not None and start + 1.1 < duration:
                     break
 
-            fname = os.path.join(args.data, fmt.format(i))
-            print(f'{i}\t{fname}\t{chosen_wav}\t{start}', file=fout)
+            fname = os.path.join(args.data, fmt.format(j))
+            print(f'{j}\t{fname}\t{chosen_wav}\t{start}', file=fout)
             sp.check_call(['sox', chosen_wav, fname, 'trim', '{:.4f}'.format(start), '1'])
 
 
