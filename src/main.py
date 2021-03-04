@@ -31,6 +31,7 @@ import models.wav2vec_resnet as model_wav2vec_resnet
 import models.fbank_ff as model_fbank_ff
 
 LOGGER = logging.getLogger('spotter_train')
+LOGGER_FORMAT = '%(asctime)s - %(pathname)s:%(lineno)d - %(levelname)s - %(message)s'
 
 DEV_PERCENTAGE = 10.
 TEST_PERCENTAGE = 10.
@@ -167,7 +168,7 @@ def _dump_val_metrics(writer: SummaryWriter, metrics: Dict[Metrics, float], step
 
 def _initialize_logging(traindir):
     handler = logging.FileHandler(os.path.join(traindir, 'log'))
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter(LOGGER_FORMAT)
     handler.setFormatter(formatter)
     handler.setLevel(logging.DEBUG)
     LOGGER.addHandler(handler)
@@ -210,14 +211,12 @@ def _get_model(args):
 
 
 def train(args, sets):
-    torch.set_num_threads(8)
-    if os.path.exists(args.traindir):
-        raise ValueError(f'{args.traindir} already exists')
+    if not os.path.exists(args.traindir):
+        raise ValueError(f'{args.traindir} doesn\'t exist')
 
-    os.makedirs(args.traindir)
+    torch.set_num_threads(8)
 
     summary_writer = SummaryWriter(os.path.join(args.traindir, 'summaries'))
-    _initialize_logging(args.traindir)
 
     with open(os.path.join(args.traindir, 'options.json'), 'w') as fout:
         json.dump(vars(args), fout)
@@ -342,8 +341,14 @@ def train(args, sets):
 
 def main(args):
     """Run train."""
-    LOGGER.setLevel(logging.INFO)
+    if os.path.exists(args.traindir):
+        raise ValueError(f'{args.traindir} already exists')
+    os.makedirs(args.traindir)
+
+    _initialize_logging(args.traindir)
+
     LOGGER.info(sys.argv)
+
     args.wanted_words = args.wanted_words.split(',')
 
     if args.self_pretrain:
@@ -352,10 +357,16 @@ def main(args):
             for fname in os.listdir(args.data)
             if fname.endswith('.wav')
         ]))
+
+        augumentation_options = selfp.AugumentationOptions(
+            specaug_options=selfp.SPECAUG_LEVELS[args.specaug_level - 1],
+            bg_noise_options=None
+        )
+
         sets = {
-            DatasetTag.TRAIN: selfp.SelfPretrainDataset(paths, 1993, None, True, args.specaug_level),
-            DatasetTag.DEV: selfp.SelfPretrainDataset(paths, 1994, 3, True, args.specaug_level),
-            DatasetTag.TEST: selfp.SelfPretrainDataset(paths, 1995, 1, False, args.specaug_level),
+            DatasetTag.TRAIN: selfp.SelfPretrainDataset(paths, 1993, None, augumentation_options),
+            DatasetTag.DEV: selfp.SelfPretrainDataset(paths, 1994, 3, augumentation_options),
+            DatasetTag.TEST: selfp.SelfPretrainDataset(paths, 1995, 1, None),
         }
         sets = [
             sets[key]
@@ -379,6 +390,6 @@ def main(args):
         raise
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(format=LOGGER_FORMAT, level=logging.DEBUG)
     faulthandler.enable()
     main(_parse_args())
