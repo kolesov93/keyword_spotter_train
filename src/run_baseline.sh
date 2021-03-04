@@ -1,0 +1,1 @@
+PYTHOPATH=/home/kolesov93/study/fairseq python3.6 main.py --use-fbank --wanted-words ne,ačiū,stop,įjunk,išjunk,į_viršų,į_apačią,į_dešinę,į_kairę,startas,pauzė,labas,iki --dev-every-batches 2048 --batch-size 16 --lr-drop 8 --lr 0.06 --model res8 /home/kolesov93/study/datasets/lt_data debug/baseline

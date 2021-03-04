@@ -11,7 +11,7 @@ import torch
 import torchaudio
 import numpy as np
 
-from .common import DatasetTag, SAMPLE_RATE, ensure_duration
+from .common import *
 
 Index = Dict[str, List[str]]
 
@@ -30,7 +30,6 @@ SILENCE_LABEL = 0
 UNKNOWN_LABEL = 1
 
 NOISE_PROB = 0.7
-NOISE_COEF = 0.1
 
 
 def _get_samples(index: Index, wanted_words: List[str]) -> List[Tuple[str, int]]:
@@ -94,17 +93,6 @@ def _get_label(label: int, wanted_words: List[str]) -> str:
 
 
 
-def _get_snippet(audio: np.array, rnd: np.random.RandomState) -> np.array:
-    """Get a random subsample of audio."""
-    samples = SAMPLE_RATE # exactly one second
-
-    if len(audio) < samples:
-        raise ValueError(f'Number of samples is to small for a sample')
-
-    start = rnd.choice(len(audio) - samples + 1)
-    return audio[start: start + samples]
-
-
 class GoogleSpeechCommandsDataset(torch.utils.data.IterableDataset):
 
     def __init__(self, index: Index, wanted_words: List[str], tag: DatasetTag):
@@ -129,11 +117,14 @@ class GoogleSpeechCommandsDataset(torch.utils.data.IterableDataset):
 
     def _get_bg_snippet(self, rnd: np.random.RandomState) -> np.array:
         fname = rnd.choice(self._bg_samples)
-        return _get_snippet(self._read_audio(fname), rnd)
+        return get_random_snippet(self._read_audio(fname), SAMPLE_RATE, rnd)
 
     def _add_noise(self, audio: np.array, rnd: np.random.RandomState) -> np.array:
-        noise = rnd.random() * NOISE_COEF * self._get_bg_snippet(rnd)
-        return np.clip(audio + noise, -1., 1.)
+        return add_noise(
+            audio,
+            self._read_audio(rnd.choice(self._bg_samples)),
+            rnd
+        )
 
     def _get_unknown_sample(self, fname: str, rnd: np.random.RandomState, add_noise: bool):
         data = ensure_duration(self._read_audio(fname))
