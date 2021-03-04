@@ -58,8 +58,7 @@ def f_init(gpu_queue):
 
 def main():
     faulthandler.enable()
-    GPUS = [2, 3, 4, 5, 6, 7]
-    GPUS = [0, 1]
+    GPUS = [0]
     cmds = [line.strip() for line in sys.stdin]
 
     gpu_queue = multiprocessing.Queue()

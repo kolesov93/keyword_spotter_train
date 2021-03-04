@@ -65,6 +65,7 @@ def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--initialize-body', type=str, default=None, help='path/to/mdl to initialize body (without head) with')
     parser.add_argument('--limit', type=int, default=None, help='leave this number of samples per word')
+    parser.add_argument('--specaug-level', type=int, default=1)
     parser.add_argument('--batch-size', type=int, default=64, help='batch size')
     parser.add_argument('--lr', type=float, default=1e-1, help='starting learning rate')
     parser.add_argument('--frame-length', type=float, default=25., help='frame length in ms')
@@ -352,9 +353,9 @@ def main(args):
             if fname.endswith('.wav')
         ]))
         sets = {
-            DatasetTag.TRAIN: selfp.SelfPretrainDataset(paths, 1993, None, True),
-            DatasetTag.DEV: selfp.SelfPretrainDataset(paths, 1994, 10, True),
-            DatasetTag.TEST: selfp.SelfPretrainDataset(paths, 1995, 1, False),
+            DatasetTag.TRAIN: selfp.SelfPretrainDataset(paths, 1993, None, True, args.specaug_level),
+            DatasetTag.DEV: selfp.SelfPretrainDataset(paths, 1994, 3, True, args.specaug_level),
+            DatasetTag.TEST: selfp.SelfPretrainDataset(paths, 1995, 1, False, args.specaug_level),
         }
         sets = [
             sets[key]

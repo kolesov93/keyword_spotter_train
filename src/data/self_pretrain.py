@@ -2,14 +2,14 @@ import torch
 import torchaudio
 import numpy as np
 
-from .common import SAMPLE_RATE
+from .common import SAMPLE_RATE, ensure_duration
 
 from typing import Dict, Optional, List
 
 
 class SelfPretrainDataset(torch.utils.data.IterableDataset):
 
-    def __init__(self, paths: List[str], seed: int, xerox: Optional[int] = None, augument: bool = True):
+    def __init__(self, paths: List[str], seed: int, xerox: Optional[int] = None, augument: bool = True, level: int = 1):
         """
         - paths - paths to .wav files
         - seed - random seed
@@ -21,6 +21,7 @@ class SelfPretrainDataset(torch.utils.data.IterableDataset):
         self._rnd = np.random.RandomState(seed=seed)
         self._cache = {}
         self._fixed_set = None
+        self._level = level
 
         if xerox is not None:
             self._prepare_fixed_set(xerox)
@@ -31,6 +32,8 @@ class SelfPretrainDataset(torch.utils.data.IterableDataset):
         waveform, sample_rate = torchaudio.load(fname)
         if sample_rate != SAMPLE_RATE:
             raise ValueError(f'{fname} has sample rate {sample_rate}, not {SAMPLE_RATE}')
+        waveform = np.array([ensure_duration(waveform[0].cpu().detach().numpy())])
+        waveform = torch.from_numpy(waveform)
         data = torchaudio.compliance.kaldi.fbank(
             waveform,
             num_mel_bins=80,
@@ -42,13 +45,21 @@ class SelfPretrainDataset(torch.utils.data.IterableDataset):
 
     def _augument(self, spectrogram):
         spectrogram = spectrogram.detach().clone()
-        freq_times = 1
-        time_times = 1
-        max_freqs = 3
-        max_times = 3
-
-        # freq_times = 0
-        # time_times = 0
+        if self._level == 1:
+            freq_times = 1
+            time_times = 1
+            max_freqs = 25
+            max_times = 25
+        elif self._level == 2:
+            freq_times = 2
+            time_times = 2
+            max_freqs = 15
+            max_times = 15
+        elif self._level == 3:
+            freq_times = 1
+            time_times = 1
+            max_freqs = 40
+            max_times = 40
 
         for _ in range(freq_times):
             f = self._rnd.randint(low=1, high=max_freqs)
