@@ -11,7 +11,7 @@ import torch
 import torchaudio
 import numpy as np
 
-from .common import DatasetTag, SAMPLE_RATE
+from .common import DatasetTag, SAMPLE_RATE, ensure_duration
 
 Index = Dict[str, List[str]]
 
@@ -92,22 +92,6 @@ def _get_label(label: int, wanted_words: List[str]) -> str:
     return wanted_words[label - 2]
 
 
-def _ensure_duration(audio: np.array) -> np.array:
-    samples = SAMPLE_RATE  # exactly one second
-
-    if len(audio) == samples:
-        return audio
-
-    if len(audio) > samples:
-        to_remove = len(audio) - samples
-        left = to_remove // 2
-        return audio[left: left + samples]
-
-    to_pad = samples - len(audio)
-    left = to_pad // 2
-    right = to_pad - left
-
-    return np.pad(audio, (left, right), 'constant')
 
 
 def _get_snippet(audio: np.array, rnd: np.random.RandomState) -> np.array:
@@ -152,7 +136,7 @@ class GoogleSpeechCommandsDataset(torch.utils.data.IterableDataset):
         return np.clip(audio + noise, -1., 1.)
 
     def _get_unknown_sample(self, fname: str, rnd: np.random.RandomState, add_noise: bool):
-        data = _ensure_duration(self._read_audio(fname))
+        data = ensure_duration(self._read_audio(fname))
         if add_noise:
             data = self._add_noise(data, rnd)
         return {'data': data, 'label': UNKNOWN_LABEL}
@@ -163,7 +147,7 @@ class GoogleSpeechCommandsDataset(torch.utils.data.IterableDataset):
 
     def _get_command_sample(self, sample: Tuple[str, int], rnd: np.random.RandomState, add_noise: bool):
         fname, label = sample
-        data = _ensure_duration(self._read_audio(fname))
+        data = ensure_duration(self._read_audio(fname))
         if add_noise:
             data = self._add_noise(data, rnd)
         return {'data': data, 'label': label}

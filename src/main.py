@@ -23,6 +23,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 import data.google_speech_commands as gsc
 from data.common import DatasetTag
+import data.self_pretrain as selfp
 
 import models.resnet as resnet
 import models.wav2vec as model_wav2vec
@@ -47,10 +48,6 @@ class Metrics(enum.Enum):
 MODEL_PATH = '/home/kolesov93/study/wav2vec_models/wav2vec_small.pt'
 
 def make_wav2vec_collate_fn(args):
-    # cp = torch.load(MODEL_PATH)
-    # model = Wav2Vec2Model.build_model(cp['args'])
-    # model.eval()
-
     def collate_fn(samples):
         x, y = [], []
         for sample in samples:
@@ -58,38 +55,17 @@ def make_wav2vec_collate_fn(args):
             y.append(sample['label'])
 
         x = np.array(x)
-        #features = model.feature_extractor(torch.tensor(np.array(x)))
-        #x = features.permute(0, 2, 1)
         y = np.array(y, dtype=np.int64)
         return torch.from_numpy(x), torch.from_numpy(y)
 
     return collate_fn
 
 
-def make_collate_fn(args):
-
-    def collate_fn(samples):
-        x, y = [], []
-        for sample in samples:
-            x.append(
-                torchaudio.compliance.kaldi.fbank(
-                    torch.from_numpy(sample['data'].reshape(1, -1)),
-                    num_mel_bins=args.num_mel_bins,
-                    frame_shift=args.frame_shift,
-                    frame_length=args.frame_length,
-                ).reshape(1, -1, args.num_mel_bins)
-            )
-            y.append(sample['label'])
-        x = torch.cat(x, 0)
-        y = np.array(y, dtype=np.int64)
-        return x, torch.from_numpy(y)
-
-    return collate_fn
-
 def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--initialize-body', type=str, default=None, help='path/to/mdl to initialize body (without head) with')
     parser.add_argument('--limit', type=int, default=None, help='leave this number of samples per word')
+    parser.add_argument('--specaug-level', type=int, default=1)
     parser.add_argument('--batch-size', type=int, default=64, help='batch size')
     parser.add_argument('--lr', type=float, default=1e-1, help='starting learning rate')
     parser.add_argument('--frame-length', type=float, default=25., help='frame length in ms')
@@ -106,49 +82,11 @@ def _parse_args():
     )
     parser.add_argument('--use-fbank', action='store_true')
     parser.add_argument('--wanted-words', default=WANTED_WORDS)
+    parser.add_argument('--self-pretrain', action='store_true')
     parser.add_argument('data', help='path/to/google_speech_command/dataset')
     parser.add_argument('traindir', help='path/to/traindir')
     return parser.parse_args()
 
-class LinearModel(torch.nn.Module):
-
-    def __init__(self, D_in, D_out):
-        super(LinearModel, self).__init__()
-        self.linear = torch.nn.Linear(D_in, D_out)
-
-    def forward(self, x):
-        y = self.linear(x)
-        return y
-
-class FeedforwardModel(torch.nn.Module):
-
-    def __init__(self, units, noutputs):
-        super(FeedforwardModel, self).__init__()
-        timestamps = 98
-        prev = 80
-        self._linears = []
-        for unit in units:
-            self._linears.append(torch.nn.Linear(prev, unit))
-            prev = unit
-        self._final = torch.nn.Linear(prev * timestamps, noutputs)
-
-    def forward(self, x):
-        batch_size = x.shape[0]
-
-        xs = []
-        for curx in x:
-            xs.append(
-                torchaudio.compliance.kaldi.fbank(curx.reshape(1, -1), num_mel_bins=80, dither=0.)
-            )
-        x = torch.cat(xs, 0).reshape(batch_size, -1, 80)
-
-        for linear in self._linears:
-            x = linear(x)
-            x = F.relu(x)
-
-        x = x.reshape(x.shape[0], -1)
-        x = self._final(x)
-        return x
 
 class AccuracyComputer:
     def __init__(self):
@@ -216,6 +154,7 @@ def evaluate(model, dataset, collate_fn):
         LOGGER.info('%s: %.02f', metric, value)
     return result
 
+
 def _dump_val_metrics(writer: SummaryWriter, metrics: Dict[Metrics, float], step: int):
     for metric, value in metrics.items():
         writer.add_scalar(
@@ -224,6 +163,7 @@ def _dump_val_metrics(writer: SummaryWriter, metrics: Dict[Metrics, float], step
             step
         )
     writer.flush()
+
 
 def _initialize_logging(traindir):
     handler = logging.FileHandler(os.path.join(traindir, 'log'))
@@ -246,8 +186,16 @@ def _get_model(args):
         config = copy.deepcopy(resnet.RES26_CONFIG)
     elif args.model == 'res26_narrow':
         config = copy.deepcopy(resnet.RES26_NARROW_CONFIG)
-    config['n_labels'] = len(args.wanted_words) + 2
+
+    if args.self_pretrain:
+        config['from_fbank'] = True
+        config['n_labels'] = len(list(fname for fname in os.listdir(args.data) if fname.endswith('.wav')))
+
+    else:
+        config['n_labels'] = len(args.wanted_words) + 2
     config['model_path'] = args.model_path
+
+    LOGGER.info('Using config %s', config)
     if args.use_fbank:
         if args.model == 'ff':
             model = model_fbank_ff.FbankFFModel(config)
@@ -274,7 +222,10 @@ def train(args, sets):
     with open(os.path.join(args.traindir, 'options.json'), 'w') as fout:
         json.dump(vars(args), fout)
 
-    collate_fn = make_wav2vec_collate_fn(args)
+    if args.self_pretrain:
+        collate_fn = selfp.collate_fn
+    else:
+        collate_fn = make_wav2vec_collate_fn(args)
 
     model = _get_model(args)
     if args.initialize_body:
@@ -395,15 +346,31 @@ def main(args):
     LOGGER.info(sys.argv)
     args.wanted_words = args.wanted_words.split(',')
 
-    indexes = gsc.split_index(gsc.get_index(args.data), DEV_PERCENTAGE, TEST_PERCENTAGE, args.limit)
-    sets = [
-        gsc.GoogleSpeechCommandsDataset(
-            indexes[tag],
-            args.wanted_words,
-            tag
-        )
-        for tag in DatasetTag
-    ]
+    if args.self_pretrain:
+        paths = list(sorted([
+            os.path.join(args.data, fname)
+            for fname in os.listdir(args.data)
+            if fname.endswith('.wav')
+        ]))
+        sets = {
+            DatasetTag.TRAIN: selfp.SelfPretrainDataset(paths, 1993, None, True, args.specaug_level),
+            DatasetTag.DEV: selfp.SelfPretrainDataset(paths, 1994, 3, True, args.specaug_level),
+            DatasetTag.TEST: selfp.SelfPretrainDataset(paths, 1995, 1, False, args.specaug_level),
+        }
+        sets = [
+            sets[key]
+            for key in sorted(sets.keys())
+        ]
+    else:
+        indexes = gsc.split_index(gsc.get_index(args.data), DEV_PERCENTAGE, TEST_PERCENTAGE, args.limit)
+        sets = [
+            gsc.GoogleSpeechCommandsDataset(
+                indexes[tag],
+                args.wanted_words,
+                tag
+            )
+            for tag in DatasetTag
+        ]
 
     try:
         train(args, sets)

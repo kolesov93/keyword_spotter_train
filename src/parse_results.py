@@ -86,6 +86,13 @@ class PossibleNoneFieldGetter:
     def get_formatted_value(self, options):
         return str(options[self._field] or self._default_formatted_value)
 
+class PretrainSizeGetter:
+
+    def get_value(self, options):
+        return int(options['data'].split('/')[-1])
+
+    def get_formatted_value(self, options):
+        return str(self.get_value(options))
 
 GETTERS = {
     'limit': PossibleNoneFieldGetter('limit', -1, 'no'),
@@ -98,9 +105,11 @@ GETTERS = {
     'lr_drop': FloatGetter('lr_drop', '{:.04f}'),
     'lang': LangGetter(),
     'accuracy': FloatGetter('accuracy', '{:.02f}%'),
-    'xent': FloatGetter('xent', '{:.03f}')
+    'xent': FloatGetter('xent', '{:.03f}'),
+    'pretrain_size': PretrainSizeGetter(),
+    'specaug_level': FieldGetter('specaug_level')
 }
-FIELDS = ['limit', 'uptrain', 'features', 'batch_size', 'dev_every_batches', 'model', 'lr', 'lr_drop', 'lang']
+FIELDS = ['limit', 'uptrain', 'features', 'batch_size', 'dev_every_batches', 'model', 'lr', 'lr_drop', 'lang', 'pretrain_size', 'specaug_level']
 METRICS = ['accuracy', 'xent']
 
 
@@ -110,8 +119,10 @@ def _get_fnames():
         result.append(line.strip())
     return result
 
+
 def _get_params():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--skip-fields', type=str, nargs='*', default=[])
     parser.add_argument('--header', action='store_true')
     parser.add_argument('--group-by', nargs='+')
     return parser.parse_args()
@@ -121,33 +132,11 @@ def _get_key(options, keys):
     return tuple(GETTERS[key].get_value(options) for key in keys)
 
 
-def _get_lang(data):
-    if 'rus_data' in data:
-        return 'ru'
-    if 'lt_data' in data:
-        return 'lt'
-    return 'en'
-
-
-def _get_uptrain(data):
-    if 'initialize_body' in data:
-        return 'yes'
-    return 'no'
-
-
-def _get_features(use_fbank):
-    if use_fbank:
-        return 'fbank'
-    return 'wav2vec'
-
-
-def _get_model(model):
-    return '\\texttt{' + model.replace('_', '-') + '}'
-
-
 def main():
     fnames = _get_fnames()
     args = _get_params()
+
+    fields = [f for f in FIELDS if f not in args.skip_fields]
 
     results = []
     for fname in fnames:
@@ -156,7 +145,7 @@ def main():
         with open(os.path.join(os.path.dirname(fname), 'options.json')) as fin:
             options = json.load(fin)
 
-        for field in FIELDS:
+        for field in fields:
             try:
                 GETTERS[field].get_value(options)
             except Exception as ex:
@@ -184,13 +173,13 @@ def main():
 
 
     if args.header:
-        row = FIELDS + METRICS
+        row = fields + METRICS
         print(' & '.join(row) + ' \\\\')
 
     for key in sorted(key2best):
         options, metrics = key2best[key]
         row = []
-        for field in FIELDS:
+        for field in fields:
             row.append(GETTERS[field].get_formatted_value(options))
         for metric in METRICS:
             row.append(GETTERS[metric].get_formatted_value(metrics))
