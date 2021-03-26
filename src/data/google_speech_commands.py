@@ -221,6 +221,8 @@ def which_set(fname: str, dev_percentage: float, test_percentage: float) -> Data
     See https://github.com/tensorflow/tensorflow/blob/master/tensorflow/examples/speech_commands/input_data.py#L70
     """
     base_name = os.path.basename(fname)
+    if base_name.startswith('pseudo'):
+        return DatasetTag.TRAIN
     hash_name = re.sub(r'_nohash_.*$', '', base_name)
     hash_name_hashed = hashlib.sha1(hash_name.encode('UTF-8')).hexdigest()
     percentage_hash = ((int(hash_name_hashed, 16) % (MAX_NUM_WAVS_PER_CLASS + 1)) * (100.0 / MAX_NUM_WAVS_PER_CLASS))

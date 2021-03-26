@@ -22,12 +22,21 @@ class LangGetter:
         data = options['data']
         if 'rus_data' in data:
             return 'ru'
-        elif 'lt_data' in data:
+        elif any(token in data for token in ('lt_data', 'lt_pseudo')):
             return 'lt'
         return 'en'
 
     def get_formatted_value(self, options):
         return self.get_value(options)
+
+
+class PseudoGetter:
+
+    def get_value(self, options):
+        return 'uptrain_282_with_lt_data' in options['data']
+
+    def get_formatted_value(self, options):
+        return 'yes' if self.get_value(options) else 'no'
 
 
 class UptrainGetter:
@@ -97,6 +106,7 @@ class PretrainSizeGetter:
 GETTERS = {
     'limit': PossibleNoneFieldGetter('limit', -1, 'no'),
     'uptrain': UptrainGetter(),
+    'pseudo': PseudoGetter(),
     'features': FeaturesGetter(),
     'batch_size': FieldGetter('batch_size'),
     'dev_every_batches': FieldGetter('dev_every_batches'),
@@ -109,7 +119,7 @@ GETTERS = {
     'pretrain_size': PretrainSizeGetter(),
     'specaug_level': FieldGetter('specaug_level')
 }
-FIELDS = ['limit', 'uptrain', 'features', 'batch_size', 'dev_every_batches', 'model', 'lr', 'lr_drop', 'lang', 'pretrain_size', 'specaug_level']
+FIELDS = ['limit', 'pseudo', 'uptrain', 'features', 'batch_size', 'dev_every_batches', 'model', 'lr', 'lr_drop', 'lang', 'pretrain_size', 'specaug_level']
 METRICS = ['accuracy', 'xent']
 
 
@@ -122,9 +132,9 @@ def _get_fnames():
 
 def _get_params():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--skip-fields', type=str, nargs='*', default=[])
+    parser.add_argument('--skip-fields', type=str, nargs='*', default=[], help='options: {}'.format(','.join(FIELDS)))
     parser.add_argument('--header', action='store_true')
-    parser.add_argument('--group-by', nargs='+')
+    parser.add_argument('--group-by', nargs='+', help='options: {}'.format(','.join(FIELDS)))
     return parser.parse_args()
 
 
@@ -133,8 +143,8 @@ def _get_key(options, keys):
 
 
 def main():
-    fnames = _get_fnames()
     args = _get_params()
+    fnames = _get_fnames()
 
     fields = [f for f in FIELDS if f not in args.skip_fields]
 

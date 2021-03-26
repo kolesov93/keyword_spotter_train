@@ -65,6 +65,7 @@ def make_wav2vec_collate_fn(args):
 def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--initialize-body', type=str, default=None, help='path/to/mdl to initialize body (without head) with')
+    parser.add_argument('--initialize-all', type=str, default=None, help='path/to/mdl to initialize all model with')
     parser.add_argument('--limit', type=int, default=None, help='leave this number of samples per word')
     parser.add_argument('--specaug-level', type=int, default=1)
     parser.add_argument('--batch-size', type=int, default=64, help='batch size')
@@ -210,6 +211,48 @@ def _get_model(args):
     return model
 
 
+def _are_new_metrics_worse(prev_metrics, new_metrics):
+    if math.isnan(new_metrics[Metrics.XENT]):
+        LOGGER.warning('New xent is nan')
+        return True
+    if prev_metrics[Metrics.ACCURACY] > new_metrics[Metrics.ACCURACY]:
+        LOGGER.warning(
+            'New accuracy is worse, than previous best: %.02f vs %.02f',
+            new_metrics[Metrics.ACCURACY],
+            prev_metrics[Metrics.ACCURACY]
+        )
+        return True
+    if prev_metrics[Metrics.ACCURACY] == new_metrics[Metrics.ACCURACY]:
+        if prev_metrics[Metrics.XENT] <= new_metrics[Metrics.XENT]:
+            LOGGER.warning(
+                'Accuracy hasn\'t changed (%.02f), but new xent is not better, than previous best: %.02f vs %.02f',
+                new_metrics[Metrics.ACCURACY],
+                new_metrics[Metrics.XENT],
+                prev_metrics[Metrics.XENT]
+            )
+            return True
+        LOGGER.info(
+            'Accuracy hasn\'t changed (%.02f), but new xent is better, than previous best: %.02f vs %.02f',
+                new_metrics[Metrics.ACCURACY],
+                new_metrics[Metrics.XENT],
+                prev_metrics[Metrics.XENT]
+        )
+        return False
+
+    LOGGER.info(
+        'New accuracy is better, than previous best: %.02f vs %.02f',
+        new_metrics[Metrics.ACCURACY],
+        prev_metrics[Metrics.ACCURACY]
+    )
+    if prev_metrics[Metrics.XENT] < new_metrics[Metrics.XENT]:
+        LOGGER.warning(
+            "New accuracy is better, but the new xent is worse: %.02f vs %.02f",
+            new_metrics[Metrics.XENT],
+            prev_metrics[Metrics.XENT]
+        )
+    return False
+
+
 def train(args, sets):
     if not os.path.exists(args.traindir):
         raise ValueError(f'{args.traindir} doesn\'t exist')
@@ -228,8 +271,13 @@ def train(args, sets):
 
     model = _get_model(args)
     if args.initialize_body:
+        assert not args.initialize_all
         LOGGER.info('Initializing body from %s', args.initialize_body)
         model.load(args.initialize_body, without_head=True)
+        LOGGER.info('Done')
+    elif args.initialize_all:
+        LOGGER.info('Initializing whole model from %s', args.initialize_body)
+        model.load(args.initialize_all)
         LOGGER.info('Done')
 
     prev_eval_metrics = evaluate(model, sets[DatasetTag.DEV], collate_fn)
@@ -270,14 +318,17 @@ def train(args, sets):
         optimizer.step()
 
         if (batch_idx + 1) % DUMP_SUMMARY_EVERY_STEPS == 0:
+            the_xent = loss.item()
+            the_accuracy = compute_accuracy(scores, y)
+
             summary_writer.add_scalar(
                 'train/xent',
-                loss.item(),
+                the_xent,
                 batch_idx + 1
             )
             summary_writer.add_scalar(
                 'train/accuracy',
-                compute_accuracy(scores, y),
+                the_accuracy,
                 batch_idx + 1
             )
             summary_writer.add_scalar(
@@ -285,6 +336,8 @@ def train(args, sets):
                 curlr,
                 batch_idx + 1
             )
+
+            LOGGER.info('batch %d, train xent: %.02f, train acc: %.01f%%', batch_idx + 1, the_xent, the_accuracy * 100.)
 
         force_stop = (curlr < args.min_lr) or (batch_idx + 1 > args.max_batches)
         if (batch_idx + 1) % args.dev_every_batches == 0 or force_stop:
@@ -295,7 +348,7 @@ def train(args, sets):
             with open(os.path.join(args.traindir, 'dev_metrics_{}.json'.format(batch_idx + 1)), 'w') as fout:
                 json.dump({m.value: value for m, value in new_eval_metrics.items()}, fout)
 
-            if new_eval_metrics[Metrics.ACCURACY] <= prev_eval_metrics[Metrics.ACCURACY] or math.isnan(new_eval_metrics[Metrics.XENT]):
+            if _are_new_metrics_worse(prev_eval_metrics, new_eval_metrics):
                 nplateaus += 1
                 if nplateaus > MAX_PLATEAUS:
                     LOGGER.warning('Hitted plateau %d times, exiting', nplateaus)
@@ -306,19 +359,10 @@ def train(args, sets):
                     lr=curlr,
                     momentum=0.9
                 )
-                LOGGER.warning(
-                    'Accuracy is getting worse (%.02f vs %.02f) or xent is nan, decreasing lr to: %f',
-                    new_eval_metrics[Metrics.ACCURACY],
-                    prev_eval_metrics[Metrics.ACCURACY],
-                    curlr
-                )
+                LOGGER.warning('Decreasing lr to: %f', curlr)
                 model.load(prev_model_fname)
-                LOGGER.warning(
-                    'Reloaded model from %s', prev_model_fname
-                )
+                LOGGER.warning('Reloaded model from %s', prev_model_fname)
             else:
-                if prev_model_fname != new_model_fname:
-                    os.unlink(prev_model_fname)
                 prev_eval_metrics = new_eval_metrics
                 prev_model_fname = new_model_fname
 
@@ -374,6 +418,11 @@ def main(args):
         ]
     else:
         indexes = gsc.split_index(gsc.get_index(args.data), DEV_PERCENTAGE, TEST_PERCENTAGE, args.limit)
+        for tag in DatasetTag:
+            with open(os.path.join(args.traindir, '{}.files'.format(tag)), 'w') as fout:
+                for label in indexes[tag]:
+                    for fname in indexes[tag][label]:
+                        print('{}\t{}'.format(fname, label), file=fout)
         sets = [
             gsc.GoogleSpeechCommandsDataset(
                 indexes[tag],
