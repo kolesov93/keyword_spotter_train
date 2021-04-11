@@ -13,8 +13,17 @@ class SerializableModule(nn.Module):
     def save(self, filename):
         torch.save(self.state_dict(), filename)
 
-    def load(self, filename):
-        self.load_state_dict(torch.load(filename, map_location=lambda storage, loc: storage))
+    # def load(self, filename):
+    #    self.load_state_dict(torch.load(filename, map_location=lambda storage, loc: storage))
+
+    def load(self, filename, without_head=False):
+        state_dict = torch.load(filename, map_location=lambda storage, loc: storage)
+        if without_head:
+            for key in list(state_dict.keys()):
+                if key.startswith('output.'):
+                    state_dict.pop(key)
+        self.load_state_dict(state_dict, strict=not without_head)
+
 
 class ResnetModel(SerializableModule):
     def __init__(self, config):
