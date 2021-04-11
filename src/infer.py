@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.6
 """Train keyword spotter."""
 import argparse
 import copy
@@ -29,6 +29,7 @@ LOGGER = logging.getLogger('spotter_infer')
 def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--sample-shift', type=int, default=8000, help='shift in samples (default: %(default)d)')
+    parser.add_argument('--treat-as-wav-scp', action='store_true')
     parser.add_argument('model', help='path/to/final.mdl')
     parser.add_argument('options', help='path/to/options.json')
     parser.add_argument('wav', help='path/to/file.wav')
@@ -91,11 +92,20 @@ def infer(args):
     torch.cuda.set_device(0)
     model.cuda()
 
-    u2path = {'sample': args.wav}
+    if args.treat_as_wav_scp:
+        u2path = {}
+        with open(args.wav) as fin:
+            for line in fin:
+                tokens = line.strip().split()
+                assert len(tokens) == 2, line.rstrip()
+                u2path[tokens[0]] = tokens[1]
+    else:
+        u2path = {'sample': args.wav}
+
     dataset = InferenceDataset(u2path, args.sample_shift)
     loader = torch.utils.data.DataLoader(
         dataset,
-        batch_size=32,
+        batch_size=128,
         collate_fn=collate_fn
     )
 
@@ -129,12 +139,12 @@ def main(args):
         options = json.load(fin)
 
     outputs = ['<sil>', '<unk>'] + options['wanted_words']
-    header = ['uttid'] + outputs + ['winner']
+    header = ['uttid', 'shift'] + outputs + ['winner']
     rows = []
     for (uttid, shift), scores in result.items():
-        row = ['{}-{}'.format(uttid, shift)]
+        row = [uttid, str(shift)]
         for score in scores:
-            row.append('{:.2f}'.format(score))
+            row.append('{:.5f}'.format(score))
         row.append(outputs[np.argmax(scores)])
         rows.append(row)
 

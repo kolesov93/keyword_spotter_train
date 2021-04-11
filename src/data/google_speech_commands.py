@@ -11,7 +11,7 @@ import torch
 import torchaudio
 import numpy as np
 
-from .common import DatasetTag, SAMPLE_RATE, ensure_duration
+from .common import *
 
 Index = Dict[str, List[str]]
 
@@ -30,7 +30,6 @@ SILENCE_LABEL = 0
 UNKNOWN_LABEL = 1
 
 NOISE_PROB = 0.7
-NOISE_COEF = 0.1
 
 
 def _get_samples(index: Index, wanted_words: List[str]) -> List[Tuple[str, int]]:
@@ -39,7 +38,9 @@ def _get_samples(index: Index, wanted_words: List[str]) -> List[Tuple[str, int]]
     result = []
     for label, word in enumerate(wanted_words):
         if word not in index:
-            raise ValueError(f'No samples for "{word}" in index')
+            LOGGER.warning("No samples for '%s' in index", word)
+            # raise ValueError(f'No samples for "{word}" in index')
+            continue
         for fname in index[word]:
             result.append((fname, label + 2))
     np.random.RandomState(seed=1993).shuffle(result)
@@ -94,17 +95,6 @@ def _get_label(label: int, wanted_words: List[str]) -> str:
 
 
 
-def _get_snippet(audio: np.array, rnd: np.random.RandomState) -> np.array:
-    """Get a random subsample of audio."""
-    samples = SAMPLE_RATE # exactly one second
-
-    if len(audio) < samples:
-        raise ValueError(f'Number of samples is to small for a sample')
-
-    start = rnd.choice(len(audio) - samples + 1)
-    return audio[start: start + samples]
-
-
 class GoogleSpeechCommandsDataset(torch.utils.data.IterableDataset):
 
     def __init__(self, index: Index, wanted_words: List[str], tag: DatasetTag):
@@ -129,11 +119,14 @@ class GoogleSpeechCommandsDataset(torch.utils.data.IterableDataset):
 
     def _get_bg_snippet(self, rnd: np.random.RandomState) -> np.array:
         fname = rnd.choice(self._bg_samples)
-        return _get_snippet(self._read_audio(fname), rnd)
+        return get_random_snippet(self._read_audio(fname), SAMPLE_RATE, rnd)
 
     def _add_noise(self, audio: np.array, rnd: np.random.RandomState) -> np.array:
-        noise = rnd.random() * NOISE_COEF * self._get_bg_snippet(rnd)
-        return np.clip(audio + noise, -1., 1.)
+        return add_noise(
+            audio,
+            self._read_audio(rnd.choice(self._bg_samples)),
+            rnd
+        )
 
     def _get_unknown_sample(self, fname: str, rnd: np.random.RandomState, add_noise: bool):
         data = ensure_duration(self._read_audio(fname))
@@ -230,6 +223,8 @@ def which_set(fname: str, dev_percentage: float, test_percentage: float) -> Data
     See https://github.com/tensorflow/tensorflow/blob/master/tensorflow/examples/speech_commands/input_data.py#L70
     """
     base_name = os.path.basename(fname)
+    if base_name.startswith('pseudo'):
+        return DatasetTag.TRAIN
     hash_name = re.sub(r'_nohash_.*$', '', base_name)
     hash_name_hashed = hashlib.sha1(hash_name.encode('UTF-8')).hexdigest()
     percentage_hash = ((int(hash_name_hashed, 16) % (MAX_NUM_WAVS_PER_CLASS + 1)) * (100.0 / MAX_NUM_WAVS_PER_CLASS))
