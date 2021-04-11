@@ -38,7 +38,9 @@ def _get_samples(index: Index, wanted_words: List[str]) -> List[Tuple[str, int]]
     result = []
     for label, word in enumerate(wanted_words):
         if word not in index:
-            raise ValueError(f'No samples for "{word}" in index')
+            LOGGER.warning("No samples for '%s' in index", word)
+            # raise ValueError(f'No samples for "{word}" in index')
+            continue
         for fname in index[word]:
             result.append((fname, label + 2))
     np.random.RandomState(seed=1993).shuffle(result)
