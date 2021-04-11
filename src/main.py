@@ -44,7 +44,6 @@ DUMP_SUMMARY_EVERY_STEPS = 20
 MAX_PLATEAUS = 5
 
 
-
 MODEL_PATH = '/home/kolesov93/study/wav2vec_models/wav2vec_small.pt'
 
 def make_wav2vec_collate_fn(args):
